@@ -80,6 +80,61 @@ notice() {
     done
 }
 
+# Two probes, both used only by MODE=diag, both written to be unable to hang.
+# That is not defensive habit: a diagnostic that runs long enough reads exactly
+# like the fault it is meant to rule out, and the last launch log that stopped
+# mid-diagnosis cost an evening.
+
+run_timeout() {
+    # timeout(1) comes from busybox on this device. If a firmware ever ships
+    # without it, every probe below becomes an unbounded wait, which is the one
+    # failure mode these probes exist to prevent -- so bring our own watchdog
+    # rather than trust the binary to be there.
+    secs=$1
+    shift
+    if command -v timeout >/dev/null 2>&1; then
+        timeout "$secs" "$@"
+        return $?
+    fi
+    "$@" &
+    _p=$!
+    ( sleep "$secs"; kill "$_p" 2>/dev/null ) &
+    _w=$!
+    wait "$_p" 2>/dev/null
+    _rc=$?
+    kill "$_w" 2>/dev/null || true
+    wait "$_w" 2>/dev/null || true   # reap it, or the shell reports the kill
+    return "$_rc"
+}
+
+run_ping() {
+    # Three packets, two seconds each, eight seconds wall -- ICMP is allowed to
+    # be silently dropped by plenty of networks, so NO REPLY narrows things
+    # without proving anything.
+    if run_timeout 8 ping -c 3 -W 2 "$1" >/dev/null 2>&1; then
+        echo "OK"
+    else
+        echo "NO REPLY"
+    fi
+}
+
+run_tcp() {
+    # host port -> OPEN / CLOSED / n/a. This is the probe nc used to do, minus
+    # the two ways nc got it wrong: it blocks (a streamer accepts and then
+    # waits to be spoken to), and its exit status means different things in
+    # busybox and BSD. bash's /dev/tcp does a connect and nothing else, so it
+    # cannot block on a peer that is quiet, and its status means one thing.
+    if command -v bash >/dev/null 2>&1; then
+        if run_timeout 5 bash -c "exec 3<>/dev/tcp/$1/$2" >/dev/null 2>&1; then
+            echo "OPEN"
+        else
+            echo "CLOSED"
+        fi
+    else
+        echo "n/a"
+    fi
+}
+
 # "Can't connect" is almost always routing or a firewall, and which of the two
 # it is depends on a fact nothing else here reports: which network this device
 # is actually on. A handheld on a phone hotspot and a PC on the home LAN look
@@ -88,6 +143,23 @@ my_addrs=$((ifconfig 2>/dev/null || ip -o -4 addr 2>/dev/null) |
     sed -n 's/.*inet addr:\([0-9.]*\).*/\1/p; s/.*inet \([0-9.]*\) .*/\1/p' |
     grep -v '^127\.' | sort -u | tr '\n' ' ') || true
 [ -n "$my_addrs" ] && echo "device addresses: $my_addrs"
+
+# The gateway and the SSID settle the same question from the other end. Two
+# devices can both be "on WiFi" and still be on different networks -- a guest
+# SSID, a repeater, a phone hotspot -- and knowing which one this is turns
+# "moonlight cannot reach the PC" from a mystery into a router setting.
+gateway=$(ip route 2>/dev/null |
+    sed -n 's/^default.*[ ]via \([0-9.]*\).*/\1/p' | head -n 1) || true
+if [ -z "$gateway" ]; then
+    gateway=$(route -n 2>/dev/null | awk '$1 == "0.0.0.0" { print $2; exit }') || true
+fi
+[ -n "$gateway" ] && echo "gateway: $gateway"
+
+ssid=$(iwgetid -r 2>/dev/null || true)
+if [ -z "$ssid" ]; then
+    ssid=$(iw dev 2>/dev/null | sed -n 's/^[[:space:]]*ssid \(.*\)$/\1/p' | head -n 1) || true
+fi
+[ -n "$ssid" ] && echo "wifi: $ssid"
 
 if [ -n "$HOST" ]; then
     host_net=$(printf '%s\n' "$HOST" | cut -d. -f1-3)
@@ -192,6 +264,59 @@ pair)
     fi
     ;;
 
+diag)
+    # Answer one question -- can this device reach the host at all? -- from the
+    # bottom of the stack upwards, then put the answer on the screen instead of
+    # in a log nobody can read on a handheld. It also doubles as a check of the
+    # notice program itself: if the panel appears, the screen works and every
+    # other "nothing happened" report is about the network.
+    echo "--- network diagnosis ---"
+
+    gw_res="-"
+    [ -n "$gateway" ] && gw_res=$(run_ping "$gateway")
+    echo "ping gateway ${gateway:-<none>}: $gw_res"
+
+    host_ping="-"
+    p_http="-"
+    p_https="-"
+    summary="no host set"
+    if [ -n "$HOST" ]; then
+        host_ping=$(run_ping "$HOST")
+        echo "ping host $HOST: $host_ping"
+        p_http=$(run_tcp "$HOST" 47989)
+        p_https=$(run_tcp "$HOST" 47984)
+        echo "tcp $HOST 47989 (serverinfo, http): $p_http"
+        echo "tcp $HOST 47984 (applist, https): $p_https"
+
+        DIAG_OUT="$LOG_ROOT/moonlight-diag.txt"
+        : >"$DIAG_OUT"
+        # The real probe: moonlight asking the host for its app list does the
+        # same HTTPS round trip a stream does, and unlike a port scan it says
+        # which layer said no -- refused, dropped, unpaired, wrong version.
+        echo "running: $MOONLIGHT list -keydir $DATA/keys $HOST"
+        run_timeout 25 "./$MOONLIGHT" list -keydir "$DATA/keys" "$HOST" \
+            >"$DIAG_OUT" 2>&1 || echo "moonlight list exited nonzero"
+        # The tail, not the head: moonlight talks while it works and only says
+        # what actually happened at the end, so the first 90 characters are
+        # usually "Connecting to ...".
+        summary=$(tail -n 2 "$DIAG_OUT" | tr '\n' ' ' | cut -c1-90)
+        [ -n "$summary" ] || summary="no output at all"
+        echo "moonlight list: $summary"
+    fi
+
+    # Longer than the default: this is the one panel worth reading properly,
+    # and A dismisses it anyway.
+    NOTICE_TIMEOUT="${DIAG_NOTICE_TIMEOUT:-90}"
+    notice "NETWORK DIAGNOSIS" \
+        "This device: ${my_addrs:-no IP}" \
+        "WiFi: ${ssid:-unknown}  Gateway: ${gateway:-unknown}" \
+        "Ping gateway: $gw_res" \
+        "Ping PC ${HOST:-<not set>}: $host_ping" \
+        "PC ports 47989 / 47984: $p_http / $p_https" \
+        "moonlight says: $summary" \
+        "Full results in moonlight.txt"
+    ;;
+
 list)
     if [ -n "$HOST" ]; then
         set -- list -keydir "$DATA/keys" "$HOST"
@@ -227,9 +352,65 @@ stream)
     fi
 
     echo "running: $MOONLIGHT $*"
-    # exec: the stream is the whole point of the launch, and Leaf expects the
-    # pak's process to be the one that is playing.
-    exec "./$MOONLIGHT" "$@"
+
+    # Deliberately not exec. exec is the obvious way to hand the device over to
+    # moonlight, and it is also why a failed stream was a black screen: every
+    # way this can fail -- never paired, host unreachable, app name not on the
+    # host -- moonlight reports in the first second or two and then exits, and
+    # with exec its exit is the script's exit. Nothing was left to print the
+    # reason, so the launch ended with an empty screen and a log nobody can
+    # read on this device. Start it in the background instead and watch it for
+    # a few seconds: if it is still alive by then it is streaming, and this
+    # script does nothing further until it ends, exactly as exec would have.
+    STREAM_OUT="$LOG_ROOT/moonlight-stream.txt"
+    : >"$STREAM_OUT"
+    "./$MOONLIGHT" "$@" >"$STREAM_OUT" 2>&1 &
+    stream_pid=$!
+
+    waited=0
+    while [ "$waited" -lt "${STREAM_START_TIMEOUT:-5}" ]; do
+        kill -0 "$stream_pid" 2>/dev/null || break
+        sleep 1
+        waited=$((waited + 1))
+    done
+
+    if kill -0 "$stream_pid" 2>/dev/null; then
+        # It got past the handshake; whatever happens now is the stream.
+        wait "$stream_pid" || true
+        cat "$STREAM_OUT"
+        exit 0
+    fi
+
+    wait "$stream_pid" || true
+    cat "$STREAM_OUT"
+
+    reason=$(tr '\n' ' ' <"$STREAM_OUT" | cut -c1-200)
+    echo "stream failed: $reason"
+    if grep -qiE "can.?t connect" "$STREAM_OUT"; then
+        notice "CANNOT REACH HOST" \
+            "${HOST:-the host} did not answer." \
+            "Check Sunshine is running and that" \
+            "this device is on the same network." \
+            "Run MODE=diag to see what is blocked."
+    elif grep -qi "autodiscovery failed" "$STREAM_OUT"; then
+        notice "NO HOST FOUND" \
+            "Nothing answered discovery." \
+            "Set HOST to the PC's IP in" \
+            "moonlight-user.conf."
+    elif grep -qi "pair" "$STREAM_OUT"; then
+        notice "NOT PAIRED" \
+            "This device has not been paired with" \
+            "${HOST:-the host} yet." \
+            "Set MODE=pair in moonlight-user.conf" \
+            "and open the pak again for a PIN."
+    elif grep -qiE "not found|no application|does not exist" "$STREAM_OUT"; then
+        notice "APP NOT FOUND" \
+            "'$APP' is not listed on the host." \
+            "Run MODE=list to see the real names."
+    else
+        notice "STREAM FAILED" "$reason" "See moonlight-stream.txt"
+    fi
+    exit 1
     ;;
 
 *)

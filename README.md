@@ -47,13 +47,24 @@ Copy `build/package/Moonlight.pak` to the SD card:
 
 Everything the launch prints goes to the shared log, `moonlight.txt`.
 
+### When nothing appears on screen
+
+Set `MODE="diag"` and open the pak. It does not stream; it measures whether
+this device can reach `HOST` at all — ping the gateway, ping the PC, connect to
+ports 47989 and 47984, then one real `moonlight list` request — and puts the
+result on screen. It also proves the screen works: if the panel shows up, every
+other "black screen" is about the network, not about rendering.
+
+A failed `stream` now says why on screen too (not paired / cannot reach host /
+app not on host) instead of ending in an empty screen.
+
 ### Settings
 
 | Variable | Meaning | Default |
 |---|---|---|
 | `HOST` | PC address; empty = mDNS autodiscovery | empty |
 | `APP` | application name on the host | `Steam` |
-| `MODE` | `stream` / `pair` / `list` / `quit` | `stream` |
+| `MODE` | `stream` / `pair` / `list` / `diag` / `quit` | `stream` |
 | `WIDTH`/`HEIGHT`/`FPS` | stream geometry | `1280`/`720`/`60` |
 | `BITRATE` | Kbps | `10000` |
 | `CODEC` | `h264` or `hevc` | `h264` |
