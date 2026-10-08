@@ -1,0 +1,10 @@
+# Build products. Everything under build/ is reproducible from scripts/ plus the
+# pinned toolchain image, so only its recipe belongs in git, never its output.
+build/
+*.pak.zip
+
+# macOS Finder detritus.
+.DS_Store
+
+# Per-machine workspace data.
+.workbuddy/

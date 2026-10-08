@@ -1,0 +1,12 @@
+{
+  "name": "Moonlight",
+  "version": "2.7.1",
+  "icon": "res/icon.png",
+  "platform": "mlp1",
+  "pak_version": "1.0.0",
+  "min_leaf_version": "0.12.0",
+  "type": "TOOL",
+  "description": "Moonlight game streaming client: play your PC's games on the MLP1 over Sunshine or NVIDIA GameStream.",
+  "author": "moonlight-stream (cross-built for the MLP1)",
+  "repo_url": "https://github.com/moonlight-stream/moonlight-embedded"
+}

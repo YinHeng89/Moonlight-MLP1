@@ -1,0 +1,65 @@
+Moonlight for MLP1
+Copyright (C) 2026 the contributors of this repository
+
+This repository builds and packages Moonlight Embedded for the Miniloong
+Pocket 1. It is a packaging and cross-compilation project; the streaming
+client itself is upstream work, vendored verbatim under thirdparty/.
+
+--------------------------------------------------------------------------------
+Vendored sources
+--------------------------------------------------------------------------------
+
+thirdparty/moonlight-embedded
+    Moonlight Embedded, https://github.com/moonlight-stream/moonlight-embedded
+    GNU General Public License v3.0 or later. Full text in LICENSE.
+    Pinned commit: see scripts/upstream.lock.json.
+    Modified in place by patches/0001-*.patch (see patches/README.md).
+
+    Its own bundled third-party trees, carried here unchanged, are licensed as
+    follows; the licence file shipped with each is kept alongside it:
+
+    third_party/moonlight-common-c    LGPL-2.1+  (LICENSE.txt)
+        enet/  (nested)               MIT        (enet/LICENSE)
+    third_party/h264bitstream         LGPL-2.1+  (LICENSE)
+    third_party/SDL_GameControllerDB  zlib       (LICENSE)
+    third_party/ilclient              no licence file upstream
+    third_party/libcec                no licence file upstream
+
+    ilclient and libcec are not built: ENABLE_CEC is off and there is no
+    Broadcom VideoCore on the RK3566.
+
+--------------------------------------------------------------------------------
+Statically linked libraries
+--------------------------------------------------------------------------------
+
+The binary is a derived work of the libraries below. They are not vendored in
+this repository; they are downloaded and cross-compiled into the toolchain
+sysroot at build time by scripts/build-deps.sh, with versions pinned in
+scripts/upstream.lock.json. Corresponds to the offer in GPL-3.0 section 13.
+
+    ffmpeg 6.1.2      LGPL-2.1+ / GPL-2.0+ (configured --enable-gpl=no,
+                      h264/hevc decoders only, no avformat/swscale)
+    opus 1.5.2        BSD-3-Clause
+    expat 2.x         MIT
+    curl 8.x          curl (MIT-like)
+    eudev 3.2.14      GPL-2.0+
+    libevdev 1.13.3   MIT-like
+    util-linux        BSD / GPL-2.0+ (libuuid only)
+    OpenSSL 3.x       Apache-2.0
+    libatomic         GPL-3.0+ with the GCC runtime library exception
+
+    These come from the MLP1 toolchain sysroot and stay dynamically linked,
+    so they are the device's concern, not this build's: glibc 2.38,
+    SDL2 2.28.5 (zlib), ALSA (LGPL-2.1+), zlib (zlib).
+
+--------------------------------------------------------------------------------
+Licence of this repository
+--------------------------------------------------------------------------------
+
+Because it distributes a binary that is a derivative of GPL-3.0-or-later code,
+this project is itself licensed under the GNU General Public License v3.0 or
+later. See LICENSE.
+
+The build scripts, pak launcher and documentation are covered by the same
+licence. If you reuse them outside a GPL-3.0-compatible project, take them
+alone -- they carry no upstream moonlight code.

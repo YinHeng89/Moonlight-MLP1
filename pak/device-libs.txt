@@ -1,0 +1,26 @@
+# Shared libraries the Miniloong Pocket 1 provides in /lib, so the moonlight
+# binary may link them without bundling. The list is confirmed on-device, not
+# assumed: every entry below is also listed in DSperate-pak's
+# standalone/device-libs.txt, checked 2026-09-15/16 on an MLP1 running Leaf
+# 0.12.0-beta.1 (LoongOS rootfs; glibc 2.38, SDL 2.28.5). Add a library only
+# after confirming it on a device.
+#
+# Everything else the build needs -- libudev, libevdev, libuuid, opus, expat,
+# libcurl, OpenSSL, ffmpeg's libavcodec/libavutil and moonlight's own
+# gamestream/moonlight-common -- is linked statically, so this pak ships one
+# executable and nothing else.
+ld-linux-aarch64.so.1
+libc.so.6
+libm.so.6
+libpthread.so.0
+libdl.so.2
+librt.so.1
+libstdc++.so.6
+libgcc_s.so.1
+libSDL2-2.0.so.0
+libSDL2_ttf-2.0.so.0
+libasound.so.2
+libz.so.1
+libpng16.so.16
+libjpeg.so.8
+libfreetype.so.6

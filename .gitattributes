@@ -1,0 +1,9 @@
+# thirdparty/ is a verbatim copy of upstream moonlight-embedded at the commit
+# pinned in scripts/upstream.lock.json, with the two files listed in patches/
+# modified. It is vendored so a fresh clone can build without network access,
+# but it is not this project's own code, so keep it out of language statistics
+# and out of default diffs.
+thirdparty/** linguist-vendored
+
+# Pak assets that are binary by nature.
+pak/res/icon.png binary

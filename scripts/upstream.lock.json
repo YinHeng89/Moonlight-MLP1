@@ -1,0 +1,82 @@
+{
+  "schema": 1,
+  "note": "Everything needed to reproduce the moonlight binary this repository ships. A fresh clone plus Docker is the whole toolchain: the pinned MLP1 image, scripts/build-deps.sh for the libraries the SDK sysroot does not carry, then scripts/build-moonlight.sh. Each source is pinned by commit or by version, and the result is checked by scripts/verify-binary.sh rather than trusted.",
+  "toolchain": {
+    "image": "ghcr.io/utility-muffin-research-kitchen/mlp1-toolchain:latest",
+    "digest": "sha256:66aac16fb8b07e663c9b4d66970f272df195a6eba98dfad8286eabbaa617faf9",
+    "cross_prefix": "aarch64-buildroot-linux-gnu",
+    "compiler": "12.3.0 (Buildroot)",
+    "sysroot": "/opt/mlp1-toolchain/aarch64-buildroot-linux-gnu/sysroot",
+    "target": "aarch64 Cortex-A55, glibc 2.38 (Miniloong Pocket 1 / RK3566)"
+  },
+  "core": {
+    "id": "moonlight-embedded",
+    "source_url": "https://github.com/moonlight-stream/moonlight-embedded.git",
+    "source_commit": "f32e415aea6797d261d6b470dcf8bf18727341c2",
+    "version": "2.7.1",
+    "license": "GPL-3.0-or-later",
+    "submodules": {
+      "third_party/moonlight-common-c": "b126e481a195fdc7152d211def17190e3434bcce",
+      "third_party/moonlight-common-c/enet": "dea6fb5414b180908b58c0293c831105b5d124dd",
+      "third_party/SDL_GameControllerDB": "cbfc87488e446c446d5b5ded1d99a0df2273d499"
+    }
+  },
+  "patches": [
+    {
+      "file": "libgamestream/discover.c",
+      "note": "Replaces the avahi-client implementation with a direct mDNS/DNS-SD resolver for _nvstream._tcp.local. Same two behaviours as before: with a destination buffer it returns the first host that answers, without one it lists them. Drops the avahi dependency, which needed dbus and a running avahi-daemon the MLP1 does not have either way."
+    },
+    {
+      "file": "libgamestream/CMakeLists.txt",
+      "note": "avahi-client is no longer REQUIRED, and gamestream plus moonlight-common build STATIC so the finished executable is one self-contained file with nothing of ours to ship beside it."
+    }
+  ],
+  "dependencies": {
+    "note": "Cross-built by scripts/build-deps.sh into the toolchain sysroot, static only, so none of them appear on the binary's NEEDED list. The sysroot already carried SDL2 2.28.5, ALSA, OpenSSL 3.2.1, libcurl and expat as shared objects; SDL2 and ALSA are linked dynamically because the device provides them, and the rest were rebuilt static for the same reason in reverse.",
+    "eudev": "3.2.14",
+    "libevdev": "1.13.3",
+    "util-linux_libuuid": "2.40.4",
+    "opus": "1.5.2",
+    "expat": "2.6.1",
+    "curl": "8.6.0",
+    "ffmpeg": "6.1.2 (avcodec + avutil only, h264/hevc decoders and parsers)"
+  },
+  "build": {
+    "backend": "sdl",
+    "sdl2": "device-provided libSDL2-2.0.so.0, linked dynamically; the MLP1 ships 2.28.5 built with its Wayland video driver",
+    "audio": "SDL audio backend (audio_callbacks_sdl); PulseAudio is disabled because the device does not ship it",
+    "cmake": [
+      "-DCMAKE_BUILD_TYPE=Release",
+      "-DCMAKE_TOOLCHAIN_FILE=scripts/mlp1-toolchain.cmake",
+      "-DENABLE_SDL=ON -DENABLE_FFMPEG=ON",
+      "-DENABLE_X11=OFF -DENABLE_PULSE=OFF -DENABLE_CEC=OFF",
+      "-DOPENSSL_USE_STATIC_LIBS=ON",
+      "-DCURL_LIBRARY=<sysroot>/usr/lib/libcurl.a",
+      "-DEXPAT_LIBRARY=<sysroot>/usr/lib/libexpat.a",
+      "-DCMAKE_EXE_LINKER_FLAGS=-lz",
+      "-DCMAKE_C_STANDARD_LIBRARIES=-Wl,--push-state -Wl,-Bstatic -latomic -Wl,--pop-state"
+    ],
+    "cflags": "-O2 -pipe -mcpu=cortex-a55"
+  },
+  "artifact": {
+    "file_name": "moonlight",
+    "size_bytes": 8307392,
+    "needed": [
+      "ld-linux-aarch64.so.1",
+      "libc.so.6",
+      "libm.so.6",
+      "libSDL2-2.0.so.0",
+      "libasound.so.2",
+      "libz.so.1"
+    ],
+    "note": "Every NEEDED library is one the MLP1 provides (pak/device-libs.txt, the list DSperate-pak confirmed on a device). The binary carries no RPATH and no bundled libraries; verify-binary.sh checks all of it."
+  },
+  "notice": {
+    "file_name": "moonlight-notice",
+    "size_bytes": 14224,
+    "source": "scripts/notice.c",
+    "license": "MIT (this repository)",
+    "link": "libSDL2-2.0.so.0 and libSDL2_ttf-2.0.so.0, both device-provided; no bundled fonts",
+    "note": "Fullscreen message program, in the same shape as DSperate-pak's notice: it stands in for the terminal the MLP1 does not have, most visibly for the pairing PIN."
+  }
+}
