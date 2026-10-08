@@ -48,9 +48,10 @@ fi
 : "${MODE:=stream}"
 : "${WIDTH:=1280}"
 : "${HEIGHT:=720}"
-: "${FPS:=60}"
-: "${BITRATE:=10000}"
+: "${FPS:=30}"
+: "${BITRATE:=5000}"
 : "${CODEC:=h264}"
+: "${PACKETSIZE:=1024}"
 : "${EXTRA:=}"
 : "${NOTICE_TIMEOUT:=30}"
 
@@ -63,9 +64,22 @@ fi
 [ -n "${ML_BITRATE+x}" ] && BITRATE="$ML_BITRATE"
 [ -n "${ML_CODEC+x}" ] && CODEC="$ML_CODEC"
 [ -n "${ML_EXTRA+x}" ] && EXTRA="$ML_EXTRA"
+[ -n "${ML_PACKETSIZE+x}" ] && PACKETSIZE="$ML_PACKETSIZE"
 [ -n "${ML_NOTICE_TIMEOUT+x}" ] && NOTICE_TIMEOUT="$ML_NOTICE_TIMEOUT"
 
-echo "mode=$MODE host='${HOST:-<discover>}' app='$APP' ${WIDTH}x${HEIGHT}@${FPS} bitrate=${BITRATE} codec=$CODEC"
+echo "mode=$MODE host='${HOST:-<discover>}' app='$APP' ${WIDTH}x${HEIGHT}@${FPS} bitrate=${BITRATE} codec=$CODEC packetsize=${PACKETSIZE:-default}"
+
+# The panel this is drawing on, which is not something a config file should
+# have to guess: the MLP1's is 960x720, a 4:3 panel, so a 16:9 stream is both
+# scaled and squashed on the way in. Worth one line in the log, because
+# "why does it look stretched / why is it slow" both come back to it.
+screen_res=$(cat /sys/class/graphics/fb0/virtual_size 2>/dev/null || true)
+if [ -z "$screen_res" ]; then
+    screen_res=$(fbset -s 2>/dev/null |
+        sed -n 's/.*mode "\([0-9]*x[0-9]*\)".*/\1/p' | head -n 1) || true
+fi
+screen_res=$(printf '%s' "$screen_res" | tr ',' 'x' | tr -d ' ')
+[ -n "$screen_res" ] && echo "screen: $screen_res"
 
 MAPPING="$PAK_DIR/res/gamecontrollerdb.txt"
 
@@ -379,8 +393,15 @@ stream)
         -width "$WIDTH" -height "$HEIGHT" \
         -fps "$FPS" \
         -bitrate "$BITRATE" \
-        -codec "$CODEC" \
-        $EXTRA
+        -codec "$CODEC"
+    # Kept under the 1500-byte ethernet MTU on purpose. Video packets larger
+    # than that get fragmented, and on a lossy 2.4GHz link losing one fragment
+    # of a frame costs the whole frame -- which is what "it stutters" looks
+    # like from the couch. Empty disables it and takes moonlight's default.
+    if [ -n "$PACKETSIZE" ]; then
+        set -- "$@" -packetsize "$PACKETSIZE"
+    fi
+    set -- "$@" $EXTRA
     if [ -n "$HOST" ]; then
         set -- "$@" "$HOST"
     fi
