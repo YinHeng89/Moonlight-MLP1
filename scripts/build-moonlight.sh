@@ -20,14 +20,25 @@ HOST_SRC=/host/thirdparty/moonlight-embedded
 log() { echo "build-moonlight: $*"; }
 
 # Fresh copy every run so a stale generated file from a previous configure
-# cannot answer a question this one asked differently. .git comes along because
-# cmake/generate_version_header.cmake reads it to stamp the build; nothing
-# else does.
+# cannot answer a question this one asked differently.
 rm -rf "$SRC"
 mkdir -p "$SRC" "$OUT"
-tar -C "$HOST_SRC" -cf - . | tar -C "$SRC" -xf -
+tar -C "$HOST_SRC" --exclude=.git -cf - . | tar -C "$SRC" -xf -
 
 rm -rf "$BUILD"
+
+# cmake/generate_version_header.cmake stamps the build by running git, and only
+# inside an if(GIT_FOUND AND IS_DIRECTORY .git). The vendored tree has no .git,
+# so both stamp variables would come out empty -- and configuration.h.in wraps
+# GIT_COMMIT_HASH in #cmakedefine, which turns an empty value into an #undef
+# that src/main.c then prints as an undeclared identifier. Supply the stamp
+# ourselves from the pinned commit instead: the version string then names the
+# exact upstream source this binary came from, which is more useful than
+# whatever the local checkout happened to be at, and it makes the build
+# independent of whether git is installed.
+LOCK=/host/scripts/upstream.lock.json
+SOURCE_COMMIT="$(sed -n 's/.*"source_commit": *"\([0-9a-f]*\)".*/\1/p' "$LOCK" | head -1)"
+[ -n "$SOURCE_COMMIT" ] || { log "cannot read source_commit from $LOCK"; exit 1; }
 
 log "configuring for MLP1 (SDL video/audio/input, ffmpeg software decode)"
 
@@ -58,6 +69,8 @@ cmake -S "$SRC" -B "$BUILD" -G Ninja \
   -DCURL_LIBRARY="$SYSROOT/usr/lib/libcurl.a" \
   -DEXPAT_LIBRARY="$SYSROOT/usr/lib/libexpat.a" \
   -DCMAKE_C_FLAGS="-O2 -pipe -mcpu=cortex-a55" \
+  -DGIT_COMMIT_HASH="${SOURCE_COMMIT:0:7}" \
+  -DGIT_BRANCH="mlp1" \
   -DCMAKE_EXE_LINKER_FLAGS="-lz" \
   -DCMAKE_C_STANDARD_LIBRARIES="-Wl,--push-state -Wl,-Bstatic -latomic -Wl,--pop-state" \
   2>&1 | tail -40

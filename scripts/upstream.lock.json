@@ -75,7 +75,7 @@
     "file_name": "moonlight-notice",
     "size_bytes": 14224,
     "source": "scripts/notice.c",
-    "license": "MIT (this repository)",
+    "license": "GPL-3.0-or-later (same as this repository)",
     "link": "libSDL2-2.0.so.0 and libSDL2_ttf-2.0.so.0, both device-provided; no bundled fonts",
     "note": "Fullscreen message program, in the same shape as DSperate-pak's notice: it stands in for the terminal the MLP1 does not have, most visibly for the pairing PIN."
   }
