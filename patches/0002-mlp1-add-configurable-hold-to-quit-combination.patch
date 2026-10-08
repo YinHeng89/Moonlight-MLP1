@@ -1,0 +1,110 @@
+diff --git a/src/input/sdl.c b/src/input/sdl.c
+index 72a2a3e..e542e6e 100644
+--- a/src/input/sdl.c
++++ b/src/input/sdl.c
+@@ -22,12 +22,84 @@
+ 
+ #include <Limelight.h>
+ 
++#include <stdio.h>    /* fprintf for the quit-combination report */
++#include <string.h>   /* strtok, memset */
++
+ #define ACTION_MODIFIERS (MODIFIER_SHIFT|MODIFIER_ALT|MODIFIER_CTRL)
+ #define QUIT_KEY SDLK_q
+ #define QUIT_BUTTONS (PLAY_FLAG|BACK_FLAG|LB_FLAG|RB_FLAG)
+ #define FULLSCREEN_KEY SDLK_f
+ #define UNGRAB_KEY SDLK_z
+ 
++/* Neither way out of a stream is reachable on a handheld.
++
++   The keyboard one wants Ctrl, Alt, Shift and Q together. A device with a
++   d-pad, four face buttons and two shoulders has no modifiers to hold.
++
++   The gamepad one wants Start, Select, LB and RB. The MLP1 has no Select, and
++   if SDL does not recognise it as a game controller at all there are no
++   controller events in the first place.
++
++   Left as it is, the only exit from a stream is the power button. So the
++   combination is configurable: ML_QUIT_COMBO is up to four SDL key names
++   separated by commas -- "x,b", or "escape,lctrl" -- and holding all of them
++   at once ends the stream. Which keys those are is a question about the
++   device, not about this code, which is what the key probe in the pak is for.
++*/
++#define MAX_QUIT_COMBO 4
++static SDL_Keycode quit_combo[MAX_QUIT_COMBO];
++static int quit_combo_count = 0;
++static bool quit_combo_held[MAX_QUIT_COMBO];
++
++static void quit_combo_init(void) {
++  const char* spec = getenv("ML_QUIT_COMBO");
++  if (spec == NULL || spec[0] == '\0')
++    return;
++
++  char buf[256];
++  snprintf(buf, sizeof(buf), "%s", spec);
++  for (char* tok = strtok(buf, ","); tok != NULL && quit_combo_count < MAX_QUIT_COMBO;
++       tok = strtok(NULL, ",")) {
++    SDL_Keycode key = SDL_GetKeyFromName(tok);
++    if (key == SDLK_UNKNOWN) {
++      fprintf(stderr, "ML_QUIT_COMBO: '%s' is not an SDL key name, ignoring\n", tok);
++      continue;
++    }
++    quit_combo[quit_combo_count++] = key;
++  }
++  if (quit_combo_count > 0)
++    fprintf(stderr, "Quit: hold %s together to end the stream\n", spec);
++}
++
++/* True when this event completes the hold. Releasing any key of the
++   combination disarms all of them, so it can never be left half-pressed --
++   a quit has to be one fresh hold of the whole combination. */
++static bool quit_combo_check(SDL_Event* event) {
++  if (event->type == SDL_KEYUP) {
++    for (int i = 0; i < quit_combo_count; ++i) {
++      if (event->key.keysym.sym == quit_combo[i]) {
++        memset(quit_combo_held, 0, sizeof(quit_combo_held));
++        return false;
++      }
++    }
++    return false;
++  }
++
++  bool part_of_combo = false;
++  for (int i = 0; i < quit_combo_count; ++i) {
++    if (event->key.keysym.sym == quit_combo[i]) {
++      quit_combo_held[i] = true;
++      part_of_combo = true;
++    }
++  }
++  if (!part_of_combo)
++    return false;
++  for (int i = 0; i < quit_combo_count; ++i)
++    if (!quit_combo_held[i])
++      return false;
++  return true;
++}
++
+ static const int SDL_TO_LI_BUTTON_MAP[] = {
+   A_FLAG, B_FLAG, X_FLAG, Y_FLAG,
+   BACK_FLAG, SPECIAL_FLAG, PLAY_FLAG,
+@@ -432,6 +504,8 @@ static void remove_gamepad(SDL_JoystickID sdl_id) {
+ void sdlinput_init(char* mappings) {
+   memset(gamepads, 0, sizeof(gamepads));
+ 
++  quit_combo_init();
++
+   SDL_InitSubSystem(SDL_INIT_GAMECONTROLLER);
+ #if !SDL_VERSION_ATLEAST(2, 0, 9)
+   SDL_InitSubSystem(SDL_INIT_HAPTIC);
+@@ -513,6 +587,11 @@ int sdlinput_handle_event(SDL_Window* window, SDL_Event* event) {
+ 
+     LiSendKeyboardEvent(0x80 << 8 | button, event->type==SDL_KEYDOWN?KEY_ACTION_DOWN:KEY_ACTION_UP, modifiers);
+ 
++    // Checked before the modifier combination below, which cannot fire on a
++    // device with no modifier keys. Both stay available.
++    if (quit_combo_count > 0 && quit_combo_check(event))
++      return SDL_QUIT_APPLICATION;
++
+     // Quit the stream if all the required quit keys are down
+     if ((modifiers & ACTION_MODIFIERS) == ACTION_MODIFIERS && event->key.keysym.sym == QUIT_KEY && event->type==SDL_KEYUP)
+       return SDL_QUIT_APPLICATION;

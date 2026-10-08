@@ -15,6 +15,7 @@ cd "$PAK_DIR"
 
 MOONLIGHT="moonlight"
 NOTICE="moonlight-notice"
+PROBE="moonlight-keyprobe"
 LOG_ROOT="${LOGS_PATH:-${SHARED_USERDATA_PATH:-/tmp/.userdata/shared}/logs}"
 mkdir -p "$LOG_ROOT"
 LOG="$LOG_ROOT/$MOONLIGHT.txt"
@@ -46,12 +47,16 @@ fi
 : "${HOST:=}"
 : "${APP:=Steam}"
 : "${MODE:=stream}"
-: "${WIDTH:=1280}"
+# The MLP1's panel: 960x720, 4:3. Anything wider is scaled into a shape it is
+# not, and the extra pixels are paid for twice -- over the network and again
+# in software decode.
+: "${WIDTH:=960}"
 : "${HEIGHT:=720}"
 : "${FPS:=30}"
 : "${BITRATE:=5000}"
 : "${CODEC:=h264}"
 : "${PACKETSIZE:=1024}"
+: "${QUIT_COMBO:=}"
 : "${EXTRA:=}"
 : "${NOTICE_TIMEOUT:=30}"
 
@@ -65,9 +70,19 @@ fi
 [ -n "${ML_CODEC+x}" ] && CODEC="$ML_CODEC"
 [ -n "${ML_EXTRA+x}" ] && EXTRA="$ML_EXTRA"
 [ -n "${ML_PACKETSIZE+x}" ] && PACKETSIZE="$ML_PACKETSIZE"
+[ -n "${ML_QUIT_COMBO+x}" ] && QUIT_COMBO="$ML_QUIT_COMBO"
+
+# moonlight reads this to build a quit combination out of keys this device
+# actually has. Left unset until the key probe says what those keys are --
+# a combination guessed wrong is worse than none, because it fires in the
+# middle of a game instead of ending the stream.
+if [ -n "$QUIT_COMBO" ]; then
+    ML_QUIT_COMBO="$QUIT_COMBO"
+    export ML_QUIT_COMBO
+fi
 [ -n "${ML_NOTICE_TIMEOUT+x}" ] && NOTICE_TIMEOUT="$ML_NOTICE_TIMEOUT"
 
-echo "mode=$MODE host='${HOST:-<discover>}' app='$APP' ${WIDTH}x${HEIGHT}@${FPS} bitrate=${BITRATE} codec=$CODEC packetsize=${PACKETSIZE:-default}"
+echo "mode=$MODE host='${HOST:-<discover>}' app='$APP' ${WIDTH}x${HEIGHT}@${FPS} bitrate=${BITRATE} codec=$CODEC packetsize=${PACKETSIZE:-default} quit='${QUIT_COMBO:-none}'"
 
 # The panel this is drawing on, which is not something a config file should
 # have to guess: the MLP1's is 960x720, a 4:3 panel, so a 16:9 stream is both
@@ -300,6 +315,30 @@ pair)
             "Sunshine needs the PIN typed into" \
             "https://${HOST:-the host}:47990 while" \
             "this PIN is on screen."
+    fi
+    ;;
+
+probe)
+    # What are this device's buttons? Asked because the answer decides the only
+    # thing that cannot be guessed: the keys to hold to end a stream. The probe
+    # prints every key and button it sees to the log, which is readable on a
+    # computer, and stops on its own -- it cannot ask for a button to stop.
+    PROBE_OUT="$LOG_ROOT/moonlight-probe.txt"
+    : >"$PROBE_OUT"
+    if [ -x "$PAK_DIR/$PROBE" ]; then
+        echo "running: $PROBE for ${PROBE_SECONDS:-60}s"
+        # A little longer than the probe's own timer, so a hung probe is
+        # reported rather than waited out.
+        run_timeout "$(( ${PROBE_SECONDS:-60} + 15 ))" \
+            "./$PROBE" --seconds "${PROBE_SECONDS:-60}" >"$PROBE_OUT" 2>&1 || true
+        cat "$PROBE_OUT"
+        notice "KEY PROBE DONE" \
+            "Every button name went to" \
+            "moonlight-probe.txt on the card." \
+            "Those names set QUIT_COMBO" \
+            "in moonlight-user.conf."
+    else
+        notice "KEY PROBE" "$PROBE is missing from the pak"
     fi
     ;;
 

@@ -105,6 +105,21 @@ log "verifying the notice program"
 bash /host/scripts/verify-binary.sh "$OUT/moonlight-notice" /host/pak/device-libs.txt "${GLIBC_CEILING:-2.38}" \
   | tee "$OUT/verify-notice.txt"
 
+# The key probe: reports what the device's buttons actually are, because the
+# quit combination has to be built out of keys that exist. A handheld cannot
+# press Ctrl+Alt+Shift+Q, and whether its buttons arrive as keys or as a game
+# controller is not something to guess at.
+log "compiling the key probe"
+"$CROSS-gcc" -O2 -std=c11 -Wall -Wextra \
+  $(pkg-config --cflags sdl2 SDL2_ttf) \
+  -o "$OUT/moonlight-keyprobe-raw" /host/scripts/keyprobe.c \
+  $(pkg-config --libs sdl2 SDL2_ttf)
+"$CROSS-strip" --strip-unneeded -o "$OUT/moonlight-keyprobe" "$OUT/moonlight-keyprobe-raw"
+rm -f "$OUT/moonlight-keyprobe-raw"
+log "verifying the key probe"
+bash /host/scripts/verify-binary.sh "$OUT/moonlight-keyprobe" /host/pak/device-libs.txt "${GLIBC_CEILING:-2.38}" \
+  | tee "$OUT/verify-keyprobe.txt"
+
 # Hand the artifacts back to the checkout. /build is inside the container, and
 # package-pak.sh runs on the host, where it would find nothing: it assembles
 # the pak from build/mlp1. Copying here is what makes "build-moonlight.sh then
@@ -113,9 +128,9 @@ bash /host/scripts/verify-binary.sh "$OUT/moonlight-notice" /host/pak/device-lib
 HOST_OUT=/host/build/mlp1
 if [ -d /host ]; then
   mkdir -p "$HOST_OUT"
-  cp "$OUT/moonlight" "$OUT/moonlight-notice" "$HOST_OUT/"
-  cp "$OUT/verify-binary.txt" "$OUT/verify-notice.txt" "$HOST_OUT/" 2>/dev/null || true
-  chmod 755 "$HOST_OUT/moonlight" "$HOST_OUT/moonlight-notice"
+  cp "$OUT/moonlight" "$OUT/moonlight-notice" "$OUT/moonlight-keyprobe" "$HOST_OUT/"
+  cp "$OUT/verify-binary.txt" "$OUT/verify-notice.txt" "$OUT/verify-keyprobe.txt" "$HOST_OUT/" 2>/dev/null || true
+  chmod 755 "$HOST_OUT/moonlight" "$HOST_OUT/moonlight-notice" "$HOST_OUT/moonlight-keyprobe"
 
   # The container runs as root, so anything it creates under /host comes out
   # owned by root. On a Linux host that matters: package-pak.sh then cannot
