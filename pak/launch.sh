@@ -72,10 +72,10 @@ fi
 [ -n "${ML_PACKETSIZE+x}" ] && PACKETSIZE="$ML_PACKETSIZE"
 [ -n "${ML_QUIT_COMBO+x}" ] && QUIT_COMBO="$ML_QUIT_COMBO"
 
-# moonlight reads this to build a quit combination out of keys this device
-# actually has. Left unset until the key probe says what those keys are --
-# a combination guessed wrong is worse than none, because it fires in the
-# middle of a game instead of ending the stream.
+# moonlight reads this to build a quit combination out of buttons this device
+# actually has, matching each name against both key names and gamepad buttons.
+# A combination guessed wrong is worse than none, because it fires in the
+# middle of a game instead of ending the stream, which is why the probe exists.
 if [ -n "$QUIT_COMBO" ]; then
     ML_QUIT_COMBO="$QUIT_COMBO"
     export ML_QUIT_COMBO
@@ -335,8 +335,9 @@ probe)
         notice "KEY PROBE DONE" \
             "Every button name went to" \
             "moonlight-probe.txt on the card." \
-            "Those names set QUIT_COMBO" \
-            "in moonlight-user.conf."
+            "Names like back,start or x,b" \
+            "set QUIT_COMBO in" \
+            "moonlight-user.conf."
     else
         notice "KEY PROBE" "$PROBE is missing from the pak"
     fi

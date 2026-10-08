@@ -36,18 +36,31 @@
    The keyboard one wants Ctrl, Alt, Shift and Q together. A device with a
    d-pad, four face buttons and two shoulders has no modifiers to hold.
 
-   The gamepad one wants Start, Select, LB and RB. The MLP1 has no Select, and
-   if SDL does not recognise it as a game controller at all there are no
-   controller events in the first place.
+   The gamepad one wants Start, Select, LB and RB at once, which is a lot to
+   hold one-handed, and if SDL does not recognise the device as a game
+   controller at all there are no controller events in the first place.
 
    Left as it is, the only exit from a stream is the power button. So the
-   combination is configurable: ML_QUIT_COMBO is up to four SDL key names
-   separated by commas -- "x,b", or "escape,lctrl" -- and holding all of them
-   at once ends the stream. Which keys those are is a question about the
-   device, not about this code, which is what the key probe in the pak is for.
+   combination is configurable: ML_QUIT_COMBO is up to four names separated by
+   commas, and holding them together ends the stream.
+
+   A name is looked up both as an SDL key and as a gamepad button, because the
+   two overlap exactly where it matters -- "a", "b", "x" and "y" are each a
+   letter key and a face button, and which one arrives depends on how the
+   device was recognised. One name answers to either; they never arrive as the
+   same event. On the MLP1's own mapping, "back,start" is the two centre
+   buttons and "x,b" two of the face buttons. Which names exist is a question
+   about the device, not about this code, which is what the key probe in the
+   pak exists to answer.
 */
 #define MAX_QUIT_COMBO 4
-static SDL_Keycode quit_combo[MAX_QUIT_COMBO];
+
+typedef struct {
+  SDL_Keycode key;  /* SDLK_UNKNOWN when this name is not a key */
+  int pad;          /* -1 when this name is not a gamepad button */
+} QUIT_COMBO_PART;
+
+static QUIT_COMBO_PART quit_combo[MAX_QUIT_COMBO];
 static int quit_combo_count = 0;
 static bool quit_combo_held[MAX_QUIT_COMBO];
 
@@ -60,40 +73,52 @@ static void quit_combo_init(void) {
   snprintf(buf, sizeof(buf), "%s", spec);
   for (char* tok = strtok(buf, ","); tok != NULL && quit_combo_count < MAX_QUIT_COMBO;
        tok = strtok(NULL, ",")) {
-    SDL_Keycode key = SDL_GetKeyFromName(tok);
-    if (key == SDLK_UNKNOWN) {
-      fprintf(stderr, "ML_QUIT_COMBO: '%s' is not an SDL key name, ignoring\n", tok);
+    QUIT_COMBO_PART part;
+    part.key = SDL_GetKeyFromName(tok);
+    part.pad = -1;
+#if SDL_VERSION_ATLEAST(2, 0, 14)
+    SDL_GameControllerButton button = SDL_GameControllerGetButtonFromString(tok);
+    if (button != SDL_CONTROLLER_BUTTON_INVALID)
+      part.pad = (int) button;
+#endif
+
+    if (part.key == SDLK_UNKNOWN && part.pad < 0) {
+      fprintf(stderr, "ML_QUIT_COMBO: '%s' is neither an SDL key nor a gamepad button, ignoring\n", tok);
       continue;
     }
-    quit_combo[quit_combo_count++] = key;
+    quit_combo[quit_combo_count++] = part;
   }
   if (quit_combo_count > 0)
     fprintf(stderr, "Quit: hold %s together to end the stream\n", spec);
 }
 
-/* True when this event completes the hold. Releasing any key of the
-   combination disarms all of them, so it can never be left half-pressed --
+/* True when this event completes the hold. Releasing any part of the
+   combination disarms all of it, so it can never be left half-pressed --
    a quit has to be one fresh hold of the whole combination. */
 static bool quit_combo_check(SDL_Event* event) {
-  if (event->type == SDL_KEYUP) {
-    for (int i = 0; i < quit_combo_count; ++i) {
-      if (event->key.keysym.sym == quit_combo[i]) {
-        memset(quit_combo_held, 0, sizeof(quit_combo_held));
-        return false;
-      }
-    }
+  int matched[MAX_QUIT_COMBO];
+  int found = 0;
+
+  if (event->type == SDL_KEYDOWN || event->type == SDL_KEYUP) {
+    for (int i = 0; i < quit_combo_count; ++i)
+      if (quit_combo[i].key != SDLK_UNKNOWN && quit_combo[i].key == event->key.keysym.sym)
+        matched[found++] = i;
+  } else if (event->type == SDL_CONTROLLERBUTTONDOWN || event->type == SDL_CONTROLLERBUTTONUP) {
+    for (int i = 0; i < quit_combo_count; ++i)
+      if (quit_combo[i].pad >= 0 && quit_combo[i].pad == (int) event->cbutton.button)
+        matched[found++] = i;
+  }
+
+  if (found == 0)
+    return false;
+
+  if (event->type == SDL_KEYUP || event->type == SDL_CONTROLLERBUTTONUP) {
+    memset(quit_combo_held, 0, sizeof(quit_combo_held));
     return false;
   }
 
-  bool part_of_combo = false;
-  for (int i = 0; i < quit_combo_count; ++i) {
-    if (event->key.keysym.sym == quit_combo[i]) {
-      quit_combo_held[i] = true;
-      part_of_combo = true;
-    }
-  }
-  if (!part_of_combo)
-    return false;
+  for (int n = 0; n < found; ++n)
+    quit_combo_held[matched[n]] = true;
   for (int i = 0; i < quit_combo_count; ++i)
     if (!quit_combo_held[i])
       return false;
@@ -654,6 +679,13 @@ int sdlinput_handle_event(SDL_Window* window, SDL_Event* event) {
     break;
   case SDL_CONTROLLERBUTTONDOWN:
   case SDL_CONTROLLERBUTTONUP:
+    // Checked ahead of everything else in this branch: the d-pad sits past the
+    // end of the button map below, and so do any other buttons moonlight has
+    // no mapping for, and every one of them still has to be able to form the
+    // quit combination.
+    if (quit_combo_count > 0 && quit_combo_check(event))
+      return SDL_QUIT_APPLICATION;
+
     gamepad = get_gamepad(event->cbutton.which, false);
     if (!gamepad)
       return SDL_NOTHING;

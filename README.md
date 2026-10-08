@@ -73,31 +73,53 @@ app not on host) instead of ending in an empty screen.
 | `BITRATE` | Kbps | `5000` |
 | `CODEC` | `h264` or `hevc` | `h264` |
 | `PACKETSIZE` | max video packet, kept under the 1500-byte MTU | `1024` |
-| `QUIT_COMBO` | SDL key names to hold together to end a stream | empty |
+| `QUIT_COMBO` | up to four names (SDL keys *or* gamepad buttons) to hold together to end a stream | `back,start` |
 | `EXTRA` | extra moonlight arguments | empty |
 
 Any of them can also be given as an `ML_`-prefixed environment variable
 (`ML_MODE`, `ML_HOST`, ...), which wins over the file — that is how a launcher
 or a test drives the pak without editing the card.
 
+### What the probe found on a real MLP1
+
+`MODE="probe"`, every button pressed once:
+
+- panel `960x720`
+- one joystick, `Loong Gamepad`, and SDL does recognise it as a game
+  controller — so the host sees a proper gamepad, not keyboard events
+- `a:b0,b:b1,x:b2,y:b3,back:b8,guide:b10,start:b9,leftstick:b11,leftshoulder:b4,rightshoulder:b5,dpup:h0.1,dpdown:h0.4,dpleft:h0.8,dpright:h0.2,leftx:a0,lefty:a1,lefttrigger:b6,righttrigger:b7`
+- there is a `back` button after all, which is why `back,start` is the default
+  quit combination, and why upstream's own Start+Select+LB+RB is reachable
+  here too — it just asks for four buttons at once
+
 ### Ending a stream
 
-Upstream offers two ways out and neither works here: `Ctrl+Alt+Shift+Q` wants
-modifier keys a handheld does not have, and the gamepad combination wants
-Start, Select, LB and RB — there is no Select, and if SDL does not recognise
-the device as a game controller there are no controller events at all.
+Upstream offers two ways out and neither is comfortable here:
+`Ctrl+Alt+Shift+Q` wants modifier keys a handheld does not have, and the
+gamepad combination wants Start, Select, LB and RB held at once — a lot of
+buttons, and useless if SDL does not recognise the device as a game controller
+at all.
 
-So the combination is configurable. `QUIT_COMBO` is a comma-separated list of
-up to four SDL key names, and holding all of them at once ends the stream:
+So the combination is configurable. `QUIT_COMBO` is up to four names, and
+holding them all at once ends the stream. Each name is looked up both as an SDL
+key and as a gamepad button, so `back,start`, `x,b`, `guide` and `escape` all
+work; `a`, `b`, `x` and `y` are each both a letter key and a face button, and
+one name answers to whichever arrives.
+
+The MLP1 is a game controller to SDL — `Loong Gamepad`, with back, start,
+guide, both shoulders, both triggers, a d-pad and four face buttons — so
+`QUIT_COMBO="back,start"` is the default. Run the probe to see your own:
 
 ```sh
 MODE="probe"     # open the pak: press every button, names go to
                  # moonlight-probe.txt on the card
-QUIT_COMBO="x,b" # then set this from the names reported there
 ```
 
 The probe stops on its own after a minute — a program whose job is to find out
 which buttons exist cannot ask for a button that does not exist to stop it.
+
+Releasing any part of the combination disarms the whole thing, so it can never
+be left half-pressed waiting to fire mid-game.
 
 ## Reproducing the binary
 
