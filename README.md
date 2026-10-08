@@ -41,9 +41,13 @@ Copy `build/package/Moonlight.pak` to the SD card:
    - `HOST="192.168.1.20"` — your PC running Sunshine. Leave it empty and
      moonlight finds the first host that answers on the network (mDNS).
    - `APP="Steam"` — the name as it appears on the host.
-2. Set `MODE="pair"` and open the pak. The PIN appears on the MLP1's screen;
-   type it into Sunshine on the PC.
-3. Set `MODE="stream"` back and open the pak again.
+2. Set `MODE="pair"` and open the pak. The PIN appears on the MLP1's screen.
+   Sunshine does not pop up a dialog the way GeForce Experience does: open
+   `https://<HOST>:47990` on the PC, log in, and type the PIN into its PIN
+   page while the PIN is still on the handheld's screen.
+3. On success the pak sets `MODE="stream"` back for you; open it again and it
+   streams. (If the card is mounted read-only it says so and you edit it by
+   hand.)
 
 Everything the launch prints goes to the shared log, `moonlight.txt`.
 

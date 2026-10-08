@@ -250,17 +250,42 @@ pair)
         exit 1
     fi
 
+    # The default 30s is not long enough for this one: the PIN has to be read
+    # off a handheld, then walked over to another machine and typed into a web
+    # page. Losing the PIN to a timeout is the worst possible failure here,
+    # because the pairing has to be restarted on the host to get another.
+    NOTICE_TIMEOUT="${PIN_NOTICE_TIMEOUT:-180}"
     if [ -n "$HOST" ]; then
-        notice "PAIRING" "Enter this PIN on your PC:" "$pin" "Host: $HOST"
+        notice "PAIRING" "Enter this PIN on your PC:" "$pin" \
+            "Host: $HOST" \
+            "Sunshine: open https://$HOST:47990" \
+            "and use its PIN page."
     else
-        notice "PAIRING" "Enter this PIN on your PC:" "$pin"
+        notice "PAIRING" "Enter this PIN on your PC:" "$pin" \
+            "Sunshine's web UI, PIN page."
     fi
 
     wait "$pair_pid" || true
     if grep -qi "ucces.*pair" "$PAIR_OUT"; then
-        notice "PAIRED" "Pairing succeeded." "Set MODE=stream and reopen."
+        # Pairing is a one-off, so put the card back the way the user wants it
+        # rather than making them edit the file again before anything works.
+        # Best effort: the card can be mounted read-only, and a failed pairing
+        # must never be the thing that leaves MODE stuck on pair.
+        paired_note="Set MODE=stream in moonlight-user.conf and open again."
+        if [ -w "$PAK_DIR/moonlight-user.conf" ] &&
+            sed 's/^MODE=.*/MODE="stream"/' "$PAK_DIR/moonlight-user.conf" \
+                >"$PAK_DIR/.moonlight-user.conf.new" 2>/dev/null &&
+            cat "$PAK_DIR/.moonlight-user.conf.new" >"$PAK_DIR/moonlight-user.conf"; then
+            rm -f "$PAK_DIR/.moonlight-user.conf.new"
+            echo "moonlight-user.conf: MODE is now stream"
+            paired_note="moonlight-user.conf is back on MODE=stream. Open the pak again to stream."
+        fi
+        notice "PAIRED" "Pairing succeeded." "$paired_note"
     else
-        notice "PAIR FAILED" "$(tail -n 3 "$PAIR_OUT" | tr '\n' ' ' | cut -c1-200)"
+        notice "PAIR FAILED" "$(tail -n 3 "$PAIR_OUT" | tr '\n' ' ' | cut -c1-200)" \
+            "Sunshine needs the PIN typed into" \
+            "https://${HOST:-the host}:47990 while" \
+            "this PIN is on screen."
     fi
     ;;
 
@@ -307,14 +332,23 @@ diag)
     # Longer than the default: this is the one panel worth reading properly,
     # and A dismisses it anyway.
     NOTICE_TIMEOUT="${DIAG_NOTICE_TIMEOUT:-90}"
-    notice "NETWORK DIAGNOSIS" \
+    set -- "NETWORK DIAGNOSIS" \
         "This device: ${my_addrs:-no IP}" \
         "WiFi: ${ssid:-unknown}  Gateway: ${gateway:-unknown}" \
         "Ping gateway: $gw_res" \
         "Ping PC ${HOST:-<not set>}: $host_ping" \
         "PC ports 47989 / 47984: $p_http / $p_https" \
-        "moonlight says: $summary" \
-        "Full results in moonlight.txt"
+        "moonlight says: $summary"
+    # Worth saying out loud, because it is how this usually ends: the network
+    # was never the problem, the pairing just has not happened yet. "Ping PC:
+    # NO REPLY" alongside two OPEN ports is the same story -- plenty of hosts
+    # ignore ICMP and it means nothing about GameStream.
+    if printf '%s\n' "$summary" | grep -qi "must pair"; then
+        set -- "$@" "PC is reachable. Set MODE=pair and open again."
+    else
+        set -- "$@" "Full results in moonlight.txt"
+    fi
+    notice "$@"
     ;;
 
 list)
