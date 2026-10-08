@@ -104,3 +104,19 @@ rm -f "$OUT/moonlight-notice-raw"
 log "verifying the notice program"
 bash /host/scripts/verify-binary.sh "$OUT/moonlight-notice" /host/pak/device-libs.txt "${GLIBC_CEILING:-2.38}" \
   | tee "$OUT/verify-notice.txt"
+
+# Hand the artifacts back to the checkout. /build is inside the container, and
+# package-pak.sh runs on the host, where it would find nothing: it assembles
+# the pak from build/mlp1. Copying here is what makes "build-moonlight.sh then
+# package-pak.sh" a complete recipe, for a person following the README and for
+# CI alike -- doing it by hand is how the gap went unnoticed.
+HOST_OUT=/host/build/mlp1
+if [ -d /host ]; then
+  mkdir -p "$HOST_OUT"
+  cp "$OUT/moonlight" "$OUT/moonlight-notice" "$HOST_OUT/"
+  cp "$OUT/verify-binary.txt" "$OUT/verify-notice.txt" "$HOST_OUT/" 2>/dev/null || true
+  chmod 755 "$HOST_OUT/moonlight" "$HOST_OUT/moonlight-notice"
+  log "exported to $HOST_OUT"
+else
+  log "no /host mount -- artifacts stay in $OUT"
+fi
