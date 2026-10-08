@@ -198,6 +198,8 @@ if [ ! -f .built ]; then
     --disable-avformat --disable-avfilter --disable-avdevice \
     --disable-swresample --disable-swscale --disable-postproc \
     --disable-network --disable-programs 2>&1 | tail -25
+  make -j"$(nproc)" 2>&1 | tail -15
+  make install 2>&1 | tail -10
   touch .built
 fi
 
@@ -207,9 +209,17 @@ fi
 # avutil wants are just 64-bit counters a static libatomic.a answers for.
 # Drop it here and let the final link take it from the archive instead.
 # Idempotent, and outside the .built guard so a cache hit still applies it.
-sed -i 's/ -latomic//g' "$PREFIX/lib/pkgconfig"/libav*.pc
-echo "ffmpeg .pc Libs lines:"
-grep -h '^Libs:' "$PREFIX/lib/pkgconfig"/libav*.pc
+# If the .pc files are absent, make install did not land and there is nothing
+# to fix up -- say so loudly instead of letting sed fail on a glob that matched
+# nothing and letting a broken sysroot look like a finished one.
+if ls "$PREFIX"/lib/pkgconfig/libav*.pc >/dev/null 2>&1; then
+  sed -i 's/ -latomic//g' "$PREFIX"/lib/pkgconfig/libav*.pc
+  echo "ffmpeg .pc Libs lines:"
+  grep -h '^Libs:' "$PREFIX"/lib/pkgconfig/libav*.pc
+else
+  echo "no ffmpeg .pc files under $PREFIX/lib/pkgconfig -- install failed" >&2
+  exit 1
+fi
 
 cd "$SRC"
 
