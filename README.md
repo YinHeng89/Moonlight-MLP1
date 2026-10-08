@@ -3,6 +3,11 @@
 Moonlight Embedded (moonlight-stream) cross-compiled for the **Miniloong Pocket 1
 (MLP1 / RK3566, aarch64)**, packaged as a Leaf tool pak.
 
+If you only want to use it, download `Moonlight.mlp1.pak.zip` from the
+[latest release](https://github.com/YinHeng89/Moonlight-MLP1/releases/latest)
+and unzip it — no toolchain needed. Every push builds it on CI; a `v*` tag also
+publishes it. Building from source is described further down.
+
 ## What is in here
 
 ```
