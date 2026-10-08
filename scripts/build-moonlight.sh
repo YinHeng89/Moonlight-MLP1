@@ -116,7 +116,18 @@ if [ -d /host ]; then
   cp "$OUT/moonlight" "$OUT/moonlight-notice" "$HOST_OUT/"
   cp "$OUT/verify-binary.txt" "$OUT/verify-notice.txt" "$HOST_OUT/" 2>/dev/null || true
   chmod 755 "$HOST_OUT/moonlight" "$HOST_OUT/moonlight-notice"
-  log "exported to $HOST_OUT"
+
+  # The container runs as root, so anything it creates under /host comes out
+  # owned by root. On a Linux host that matters: package-pak.sh then cannot
+  # create build/package inside a build/ that root owns, which is exactly how
+  # CI failed. (On Docker Desktop the file share remaps ownership, which is
+  # why this never showed up locally.) Hand the tree to whoever owns the
+  # checkout instead.
+  OWNER="$(stat -c '%u:%g' /host 2>/dev/null || true)"
+  if [ -n "$OWNER" ]; then
+    chown -R "$OWNER" /host/build || log "could not chown /host/build to $OWNER"
+  fi
+  log "exported to $HOST_OUT${OWNER:+ (owner $OWNER)}"
 else
   log "no /host mount -- artifacts stay in $OUT"
 fi
