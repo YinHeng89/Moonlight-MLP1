@@ -80,6 +80,56 @@ notice() {
     done
 }
 
+# Best-effort reachability probe, so the log can say whether the PC answered
+# at all. Returns 0 reachable, 1 refused/unreachable, 2 unknown (no nc here).
+# Only ever written to the log, never to the screen: "unknown" must not be
+# allowed to look like "unreachable", and moonlight's own error is the
+# authority on what actually happened.
+probe_host() {
+    [ -n "${1:-}" ] || return 2
+    command -v nc >/dev/null 2>&1 || return 2
+    # No -z: not every busybox build has it, and one that lacks it would read
+    # the flag as a hostname and answer "unreachable" for a host that is up.
+    # An immediate EOF on stdin closes the connection and reports the truth.
+    started=$(date +%s)
+    nc -w 3 "$1" 47989 </dev/null >/dev/null 2>&1
+    rc=$?
+    [ "$rc" -eq 0 ] || return 1
+    # nc's verdict is not portable. BSD nc exits 0 after hitting its own
+    # timeout, which reports a host that never answered as reachable -- and
+    # "the log says it answered, so it must be the app" is worse than no
+    # probe at all. A connect that burned the whole timeout never answered.
+    if [ "$(($(date +%s) - started))" -ge 3 ]; then
+        return 1
+    fi
+    return 0
+}
+
+# "Can't connect" is almost always routing or a firewall, and which of the two
+# it is depends on a fact nothing else here reports: which network this device
+# is actually on. A handheld on a phone hotspot and a PC on the home LAN look
+# identical from inside moonlight.
+my_addrs=$((ifconfig 2>/dev/null || ip -o -4 addr 2>/dev/null) |
+    sed -n 's/.*inet addr:\([0-9.]*\).*/\1/p; s/.*inet \([0-9.]*\) .*/\1/p' |
+    grep -v '^127\.' | sort -u | tr '\n' ' ') || true
+[ -n "$my_addrs" ] && echo "device addresses: $my_addrs"
+
+if [ -n "$HOST" ]; then
+    host_net=$(printf '%s\n' "$HOST" | cut -d. -f1-3)
+    my_nets=$(printf '%s\n' "$my_addrs" | tr ' ' '\n' | cut -d. -f1-3 | sort -u) || true
+    if [ -n "$my_nets" ] && ! printf '%s\n' "$my_nets" | grep -qx "$host_net"; then
+        echo "NOTE: host $HOST is on $host_net.x but this device is on:" \
+            "$(printf '%s\n' "$my_nets" | tr '\n' ' ')"
+    fi
+
+    probe_host "$HOST"
+    case $? in
+        0) echo "probe: $HOST:47989 answered" ;;
+        1) echo "probe: $HOST:47989 did NOT answer (refused, filtered, or host down)" ;;
+        *) echo "probe: no nc on this system, skipping" ;;
+    esac
+fi
+
 # The host argument goes last, and only when there is one: with no argument
 # moonlight runs its own discovery and reports what it found.
 
@@ -102,24 +152,53 @@ pair)
 
     pin=""
     waited=0
-    while [ "$waited" -lt 20 ]; do
+    while [ "$waited" -lt "${PIN_TIMEOUT:-30}" ]; do
         if [ -s "$PAIR_OUT" ]; then
             pin=$(sed -n 's/.*target PC: *\([0-9][0-9][0-9][0-9]\).*/\1/p' "$PAIR_OUT" | head -n 1)
             [ -n "$pin" ] && break
+        fi
+        # A PIN can only come from a process that is still alive. moonlight
+        # exits within a second or two when it cannot reach the host, so stop
+        # waiting the moment it dies rather than sitting out the full timeout
+        # and reporting "no PIN appeared" -- which reads like a display fault
+        # and sends everyone looking in the wrong place.
+        if ! kill -0 "$pair_pid" 2>/dev/null; then
+            echo "moonlight exited after ${waited}s without printing a PIN"
+            break
         fi
         waited=$((waited + 1))
         sleep 1
     done
 
-    if [ -n "$pin" ]; then
-        if [ -n "$HOST" ]; then
-            notice "PAIRING" "Enter this PIN on your PC:" "$pin" "Host: $HOST"
+    if [ -z "$pin" ]; then
+        wait "$pair_pid" || true
+        # Say what went wrong, not just what did not happen. "No PIN appeared"
+        # is true for every failure from here to the PC's firewall.
+        reason=$(tr '\n' ' ' <"$PAIR_OUT" | cut -c1-160)
+        if grep -qiE "can.?t connect|cannot connect" "$PAIR_OUT"; then
+            notice "CANNOT REACH HOST" \
+                "${HOST:-the host} did not answer on port 47989." \
+                "On the PC: is Sunshine/GFE running?" \
+                "Does the firewall allow moonlight?" \
+                "Same network as this device?"
+        elif grep -qi "autodiscovery failed" "$PAIR_OUT"; then
+            notice "NO HOST FOUND" \
+                "Nothing answered mDNS discovery." \
+                "Set HOST to the PC's IP in" \
+                "moonlight-user.conf and retry."
+        elif grep -qiE "pin|Enter the following" "$PAIR_OUT"; then
+            notice "PAIRING" "PIN was printed but not recognised." "$reason"
         else
-            notice "PAIRING" "Enter this PIN on your PC:" "$pin"
+            notice "PAIR FAILED" "$reason" "See moonlight-pair.txt"
         fi
+        echo "pair output: $reason"
+        exit 1
+    fi
+
+    if [ -n "$HOST" ]; then
+        notice "PAIRING" "Enter this PIN on your PC:" "$pin" "Host: $HOST"
     else
-        echo "no PIN appeared within 20s" >&2
-        notice "PAIRING" "No PIN appeared." "See moonlight.txt"
+        notice "PAIRING" "Enter this PIN on your PC:" "$pin"
     fi
 
     wait "$pair_pid" || true
