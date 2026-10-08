@@ -1,0 +1,84 @@
+name: build
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  moonlight:
+    # The toolchain image is arm64-only and its container runs target binaries
+    # natively, so build on a native aarch64 runner. Emulating it under QEMU on
+    # x86_64 works but turns the ffmpeg cross-build from minutes into hours.
+    #
+    # Native arm64 runners are free for public repositories. On a private one,
+    # either make it public or fall back to:
+    #   runs-on: ubuntu-latest
+    #   - uses: docker/setup-qemu-action@v3
+    #     with: { platforms: arm64 }
+    runs-on: ubuntu-24.04-arm
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Start the pinned toolchain container
+        run: |
+          set -euo pipefail
+          # Pinned by digest in scripts/upstream.lock.json; read it rather than
+          # repeating the string, so the two cannot drift apart.
+          DIGEST="$(sed -n 's/.*"digest": *"\(sha256:[0-9a-f]*\)".*/\1/p' scripts/upstream.lock.json | head -1)"
+          IMAGE_REPO="ghcr.io/utility-muffin-research-kitchen/mlp1-toolchain"
+          echo "image: $IMAGE_REPO@$DIGEST"
+          docker run -d --name mlp1-build \
+            -v "$PWD:/host" \
+            --entrypoint sleep "$IMAGE_REPO@$DIGEST" infinity
+          docker ps --format '{{.Names}} {{.Status}}'
+
+      - name: Cross-build the libraries the sysroot lacks
+        run: docker exec mlp1-build bash /host/scripts/build-deps.sh
+
+      - name: Build and verify moonlight
+        run: docker exec mlp1-build bash /host/scripts/build-moonlight.sh
+
+      - name: Assemble the pak
+        run: |
+          set -euo pipefail
+          sudo apt-get install -y zip
+          # Same inputs give the same bytes, so the zip is stable across runs.
+          export SOURCE_DATE_EPOCH="$(git log -1 --format=%ct)"
+          ./scripts/package-pak.sh
+          mkdir -p build/dist
+          (cd build/package && zip -qr ../dist/Moonlight.mlp1.pak.zip Moonlight.pak)
+
+      - name: Record the verification report
+        run: |
+          cp build/mlp1/verify-binary.txt build/dist/verify-binary.txt
+          cat build/dist/verify-binary.txt
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Moonlight.mlp1.pak
+          path: |
+            build/dist/Moonlight.mlp1.pak.zip
+            build/dist/verify-binary.txt
+          if-no-files-found: error
+
+      - name: Release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: build/dist/Moonlight.mlp1.pak.zip
+          body: |
+            moonlight-embedded cross-compiled for the Miniloong Pocket 1
+            (RK3566, aarch64), packaged as a Leaf tool pak.
+
+            `verify-binary.txt` in the build log is the compliance check:
+            AArch64, stripped, no RPATH, no glibc symbol above 2.38, and every
+            NEEDED library is one the device provides.
+
+            **Rendering is not covered by CI** — the toolchain's SDL2 has no
+            video driver usable in a container. Discovery, pairing, TLS and
+            decoding are exercised; the picture itself needs a device.

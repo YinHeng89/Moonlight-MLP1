@@ -82,6 +82,21 @@ stripped, carries no RPATH/RUNPATH, needs no glibc symbol above 2.38, and every
 NEEDED library is one the device provides. Pinned inputs are in
 `scripts/upstream.lock.json`.
 
+## Continuous integration
+
+`.github/workflows/build.yml` runs the same three steps on every push and pull
+request, and uploads the pak as a build artifact. Pushing a `v*` tag also
+publishes it as a GitHub release with the verification report attached.
+
+The job runs on a **native aarch64 runner**, because the toolchain image is
+arm64-only — running it under emulation on x86_64 works, but turns the ffmpeg
+cross-build from minutes into hours. Native arm64 runners are free for public
+repositories; on a private one, make the repository public or fall back to
+`ubuntu-latest` plus `docker/setup-qemu-action`, as the workflow comments note.
+
+CI covers compilation and the compliance check. It cannot cover rendering —
+see below.
+
 ## Repository layout
 
 ```
@@ -92,6 +107,7 @@ pak/                     what goes on the device: pak.json, launch.sh,
                          the user config, and the icon
 patches/                 every local change to vendored upstream, as patches
 thirdparty/              upstream moonlight-embedded, vendored verbatim
+.github/workflows/       CI: build, verify, and release the pak
 LICENSE, NOTICE          GPL-3.0-or-later, and the licence of everything
                          bundled or linked in
 ```

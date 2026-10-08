@@ -16,6 +16,21 @@ export PATH=/opt/mlp1-toolchain/bin:$PATH
 export HOME=/root
 unset MAKEFLAGS
 
+# Host tools, not target ones. The base image ships a cross compiler and little
+# else: eudev's build runs gperf over its device-property tables, and eudev and
+# util-linux both want m4/bison/flex for their generated parsers. Without these
+# the first dependency fails in a fresh container, which is exactly the
+# situation CI and a first-time clone are in. Install them only when missing,
+# so a container that already has them costs nothing.
+if ! command -v gperf >/dev/null 2>&1; then
+  echo "installing host build tools (gperf, m4, bison, flex)"
+  DEBIAN_FRONTEND=noninteractive apt-get update -qq
+  DEBIAN_FRONTEND=noninteractive apt-get install -y -qq gperf m4 bison flex pkg-config
+fi
+for t in gperf m4 bison flex; do
+  command -v "$t" >/dev/null 2>&1 || { echo "missing host tool: $t" >&2; exit 1; }
+done
+
 CROSS=aarch64-buildroot-linux-gnu
 SYSROOT=/opt/mlp1-toolchain/aarch64-buildroot-linux-gnu/sysroot
 PREFIX="$SYSROOT/usr"
