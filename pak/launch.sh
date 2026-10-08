@@ -80,31 +80,6 @@ notice() {
     done
 }
 
-# Best-effort reachability probe, so the log can say whether the PC answered
-# at all. Returns 0 reachable, 1 refused/unreachable, 2 unknown (no nc here).
-# Only ever written to the log, never to the screen: "unknown" must not be
-# allowed to look like "unreachable", and moonlight's own error is the
-# authority on what actually happened.
-probe_host() {
-    [ -n "${1:-}" ] || return 2
-    command -v nc >/dev/null 2>&1 || return 2
-    # No -z: not every busybox build has it, and one that lacks it would read
-    # the flag as a hostname and answer "unreachable" for a host that is up.
-    # An immediate EOF on stdin closes the connection and reports the truth.
-    started=$(date +%s)
-    nc -w 3 "$1" 47989 </dev/null >/dev/null 2>&1
-    rc=$?
-    [ "$rc" -eq 0 ] || return 1
-    # nc's verdict is not portable. BSD nc exits 0 after hitting its own
-    # timeout, which reports a host that never answered as reachable -- and
-    # "the log says it answered, so it must be the app" is worse than no
-    # probe at all. A connect that burned the whole timeout never answered.
-    if [ "$(($(date +%s) - started))" -ge 3 ]; then
-        return 1
-    fi
-    return 0
-}
-
 # "Can't connect" is almost always routing or a firewall, and which of the two
 # it is depends on a fact nothing else here reports: which network this device
 # is actually on. A handheld on a phone hotspot and a PC on the home LAN look
@@ -121,14 +96,22 @@ if [ -n "$HOST" ]; then
         echo "NOTE: host $HOST is on $host_net.x but this device is on:" \
             "$(printf '%s\n' "$my_nets" | tr '\n' ' ')"
     fi
-
-    probe_host "$HOST"
-    case $? in
-        0) echo "probe: $HOST:47989 answered" ;;
-        1) echo "probe: $HOST:47989 did NOT answer (refused, filtered, or host down)" ;;
-        *) echo "probe: no nc on this system, skipping" ;;
-    esac
 fi
+
+# There used to be a TCP reachability probe here. It is gone, because it
+# turned out to be worse than nothing twice over:
+#
+#   - nc blocks. busybox nc waits for the peer to close even after stdin hits
+#     EOF, and a streamer accepts the connection and then says nothing until
+#     spoken to, so the probe hung and never reached moonlight at all. That
+#     is what a launch log that stops right after "device addresses" is.
+#   - nc's exit status means opposite things across implementations. BSD nc
+#     returns 0 after its own timeout; busybox nc gets killed by timeout(1)
+#     and returns 124 for a host that is genuinely up. Both take three
+#     seconds, so neither timing nor status can tell them apart.
+#
+# A diagnosis that blocks the thing it is diagnosing, and whose verdict is
+# not portable, is not a diagnosis. moonlight reports this better itself.
 
 # The host argument goes last, and only when there is one: with no argument
 # moonlight runs its own discovery and reports what it found.
@@ -211,18 +194,22 @@ pair)
 
 list)
     if [ -n "$HOST" ]; then
-        "./$MOONLIGHT" list -keydir "$DATA/keys" "$HOST" || true
+        set -- list -keydir "$DATA/keys" "$HOST"
     else
-        "./$MOONLIGHT" list -keydir "$DATA/keys" || true
+        set -- list -keydir "$DATA/keys"
     fi
+    echo "running: $MOONLIGHT $*"
+    "./$MOONLIGHT" "$@" || true
     ;;
 
 quit)
     if [ -n "$HOST" ]; then
-        "./$MOONLIGHT" quit -keydir "$DATA/keys" "$HOST" || true
+        set -- quit -keydir "$DATA/keys" "$HOST"
     else
-        "./$MOONLIGHT" quit -keydir "$DATA/keys" || true
+        set -- quit -keydir "$DATA/keys"
     fi
+    echo "running: $MOONLIGHT $*"
+    "./$MOONLIGHT" "$@" || true
     ;;
 
 stream)
