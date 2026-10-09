@@ -1,0 +1,181 @@
+diff --git a/src/input/sdl.c b/src/input/sdl.c
+index 1acc603..fdc4275 100644
+--- a/src/input/sdl.c
++++ b/src/input/sdl.c
+@@ -125,6 +125,139 @@ static bool quit_combo_check(SDL_Event* event) {
+   return true;
+ }
+ 
++/* The MLP1's four face buttons sit the way a Nintendo pad's do -- A on the
++   right, B at the bottom, X on top, Y on the left -- and its SDL mapping keeps
++   the letter that is printed on the button: pressing the button marked A gives
++   the host an A. Games draw their prompts for an Xbox pad, where confirm is
++   the bottom button and cancel the right one. So the confirmation is on the
++   right by the labels and at the bottom by the pictures, and the two disagree.
++
++   Which of them should win turns out to be personal, and to differ from one
++   game to the next -- some read the labels, some read the positions, some let
++   you choose inside the game. So it is a setting, and not a coin flip:
++   ML_PAD_LAYOUT names the two arrangements, and ML_PAD_MAP points each printed
++   button at whichever button the host should hear, one at a time.
++
++   It is applied after the quit combination has been checked, so the names in
++   ML_QUIT_COMBO stay the ones the key probe reported, whichever is chosen. */
++static const char* PAD_FACE_NAMES[4] = { "A", "B", "X", "Y" };
++
++/* Indexed by the button as it is printed on the device -- which is what
++   pad_face_wiring has just made of what SDL reported -- giving the button the
++   host is told about. Identity until told. */
++static SDL_GameControllerButton pad_face_target[4] = {
++  SDL_CONTROLLER_BUTTON_A, SDL_CONTROLLER_BUTTON_B,
++  SDL_CONTROLLER_BUTTON_X, SDL_CONTROLLER_BUTTON_Y
++};
++
++static int pad_face_index(const char* name) {
++  for (int i = 0; i < 4; ++i)
++    if (SDL_strcasecmp(name, PAD_FACE_NAMES[i]) == 0)
++      return i;
++  return -1;
++}
++
++static void pad_layout_init(void) {
++  const char* spec = getenv("ML_PAD_MAP");
++  if (spec != NULL && spec[0] != '\0') {
++    char buf[256];
++    snprintf(buf, sizeof(buf), "%s", spec);
++    for (char* tok = strtok(buf, ","); tok != NULL; tok = strtok(NULL, ",")) {
++      char* eq = strchr(tok, '=');
++      if (eq == NULL) {
++        fprintf(stderr, "ML_PAD_MAP: '%s' is not name=name, ignoring\n", tok);
++        continue;
++      }
++      *eq = '\0';
++      int from = pad_face_index(tok);
++      int to = pad_face_index(eq + 1);
++      if (from < 0 || to < 0) {
++        fprintf(stderr, "ML_PAD_MAP: '%s' names something other than a, b, x or y, ignoring\n", tok);
++        continue;
++      }
++      pad_face_target[from] = (SDL_GameControllerButton) to;
++    }
++    fprintf(stderr, "Pad map: printed A->%s B->%s X->%s Y->%s\n",
++            PAD_FACE_NAMES[pad_face_target[0]], PAD_FACE_NAMES[pad_face_target[1]],
++            PAD_FACE_NAMES[pad_face_target[2]], PAD_FACE_NAMES[pad_face_target[3]]);
++    return;
++  }
++
++  const char* layout = getenv("ML_PAD_LAYOUT");
++  if (layout == NULL || layout[0] == '\0')
++    return;
++
++  if (SDL_strcasecmp(layout, "xbox") == 0 || SDL_strcasecmp(layout, "swap") == 0) {
++    pad_face_target[0] = SDL_CONTROLLER_BUTTON_B;
++    pad_face_target[1] = SDL_CONTROLLER_BUTTON_A;
++    pad_face_target[2] = SDL_CONTROLLER_BUTTON_Y;
++    pad_face_target[3] = SDL_CONTROLLER_BUTTON_X;
++    fprintf(stderr, "Pad layout: xbox positions (A<->B, X<->Y)\n");
++  } else if (SDL_strcasecmp(layout, "nintendo") == 0 || SDL_strcasecmp(layout, "labels") == 0) {
++    fprintf(stderr, "Pad layout: as printed on the buttons\n");
++  } else {
++    fprintf(stderr, "ML_PAD_LAYOUT: '%s' is neither 'nintendo' nor 'xbox', using the printed layout\n", layout);
++  }
++}
++
++/* Whether what SDL reports is the button printed on the device.
++
++   Everything above is written for what is printed on the keys -- that is what
++   ML_PAD_LAYOUT names and what the settings screen draws -- and the two are
++   not always the same. The MLP1's pad is not in SDL's database, so SDL numbers
++   its buttons the way Linux does, which is by position: 0 is the bottom button,
++   1 the one on the right. The device is laid out the way a Nintendo pad is,
++   with A printed on the right and B at the bottom, so what SDL calls A is the
++   button printed B. Reconciled here, once, rather than in each of the places
++   that would otherwise have to know about it.
++
++   X and Y need no swap: Linux numbers north before west, and X is printed on
++   top and Y on the left.
++
++   ML_PAD_WIRING says which it is outright, for the day a device turns out to
++   be wired the other way round. */
++static int pad_face_wiring[4] = { 0, 1, 2, 3 };   /* what SDL says -> printed */
++
++static int pad_name_has(const char* hay, const char* needle) {
++  if (hay == NULL || needle == NULL || needle[0] == '\0')
++    return 0;
++  size_t n = SDL_strlen(needle);
++  for (const char* p = hay; *p != '\0'; ++p)
++    if (SDL_strncasecmp(p, needle, n) == 0)
++      return 1;
++  return 0;
++}
++
++static void pad_wiring_init(void) {
++  const char* wiring = getenv("ML_PAD_WIRING");
++  if (wiring != NULL && wiring[0] != '\0') {
++    int by_pos = (SDL_strcasecmp(wiring, "labels") != 0 &&
++                  SDL_strcasecmp(wiring, "printed") != 0);
++    pad_face_wiring[0] = by_pos ? 1 : 0;
++    pad_face_wiring[1] = by_pos ? 0 : 1;
++    fprintf(stderr, "Pad wiring: %s\n", by_pos ? "by position" : "as printed");
++    return;
++  }
++  /* Not in the database means SDL fell back to numbering by position. */
++  for (int i = 0; i < SDL_NumJoysticks(); ++i) {
++    const char* name = SDL_GameControllerNameForIndex(i);
++    if (name == NULL)
++      name = SDL_JoystickNameForIndex(i);
++    if (name != NULL && pad_name_has(name, "Loong")) {
++      pad_face_wiring[0] = 1;
++      pad_face_wiring[1] = 0;
++      fprintf(stderr, "Pad wiring: %s is not in SDL's database, so its buttons are numbered by position; A and B swapped to match the labels\n", name);
++      return;
++    }
++  }
++}
++
++static SDL_GameControllerButton pad_face_button(SDL_GameControllerButton button) {
++  if ((int) button < 0 || (int) button > 3)
++    return button;
++  return pad_face_target[pad_face_wiring[(int) button]];
++}
++
+ static const int SDL_TO_LI_BUTTON_MAP[] = {
+   A_FLAG, B_FLAG, X_FLAG, Y_FLAG,
+   BACK_FLAG, SPECIAL_FLAG, PLAY_FLAG,
+@@ -530,12 +663,14 @@ void sdlinput_init(char* mappings) {
+   memset(gamepads, 0, sizeof(gamepads));
+ 
+   quit_combo_init();
++  pad_layout_init();
+ 
+   SDL_InitSubSystem(SDL_INIT_GAMECONTROLLER);
+ #if !SDL_VERSION_ATLEAST(2, 0, 9)
+   SDL_InitSubSystem(SDL_INIT_HAPTIC);
+ #endif
+   SDL_GameControllerAddMappingsFromFile(mappings);
++  pad_wiring_init();
+ 
+   // Add game controllers here to ensure an accurate count
+   // goes to the host when starting a new session.
+@@ -686,16 +821,18 @@ int sdlinput_handle_event(SDL_Window* window, SDL_Event* event) {
+     if (quit_combo_count > 0 && quit_combo_check(event))
+       return SDL_QUIT_APPLICATION;
+ 
++    SDL_GameControllerButton pad_button = pad_face_button((SDL_GameControllerButton) event->cbutton.button);
++
+     gamepad = get_gamepad(event->cbutton.which, false);
+     if (!gamepad)
+       return SDL_NOTHING;
+-    if (event->cbutton.button >= SDL_arraysize(SDL_TO_LI_BUTTON_MAP))
++    if ((int) pad_button >= SDL_arraysize(SDL_TO_LI_BUTTON_MAP))
+       return SDL_NOTHING;
+ 
+     if (event->type == SDL_CONTROLLERBUTTONDOWN)
+-      gamepad->buttons |= SDL_TO_LI_BUTTON_MAP[event->cbutton.button];
++      gamepad->buttons |= SDL_TO_LI_BUTTON_MAP[pad_button];
+     else
+-      gamepad->buttons &= ~SDL_TO_LI_BUTTON_MAP[event->cbutton.button];
++      gamepad->buttons &= ~SDL_TO_LI_BUTTON_MAP[pad_button];
+ 
+     if ((gamepad->buttons & QUIT_BUTTONS) == QUIT_BUTTONS)
+       return SDL_QUIT_APPLICATION;
