@@ -16,6 +16,7 @@ cd "$PAK_DIR"
 MOONLIGHT="moonlight"
 NOTICE="moonlight-notice"
 PROBE="moonlight-keyprobe"
+MENU="moonlight-menu"
 LOG_ROOT="${LOGS_PATH:-${SHARED_USERDATA_PATH:-/tmp/.userdata/shared}/logs}"
 mkdir -p "$LOG_ROOT"
 LOG="$LOG_ROOT/$MOONLIGHT.txt"
@@ -37,6 +38,11 @@ export HOME
 # Priority, lowest to highest: the built-in fallbacks just below, then
 # moonlight-user.conf, then ML_* variables in the environment. The ML_ prefix
 # is how a launcher or a test drives this pak without editing the card.
+#
+# It is a function because it runs twice when the settings screen is used: once
+# to show the screen its current values, and again after it has written the
+# file, because every setting may have changed while the screen was open.
+load_settings() {
 if [ -r "$PAK_DIR/moonlight-user.conf" ]; then
     # shellcheck disable=SC1091
     . "$PAK_DIR/moonlight-user.conf"
@@ -57,6 +63,11 @@ fi
 : "${CODEC:=h264}"
 : "${PACKETSIZE:=1024}"
 : "${QUIT_COMBO:=}"
+: "${PAD_MAP:=}"
+# What gets streamed is a PC game, and a PC game draws its prompts for an Xbox
+# pad: confirm at the bottom. On this device that is the button printed B, so
+# the positions are what have to win by default.
+: "${PAD_LAYOUT:=xbox}"
 : "${EXTRA:=}"
 : "${NOTICE_TIMEOUT:=30}"
 
@@ -71,6 +82,9 @@ fi
 [ -n "${ML_EXTRA+x}" ] && EXTRA="$ML_EXTRA"
 [ -n "${ML_PACKETSIZE+x}" ] && PACKETSIZE="$ML_PACKETSIZE"
 [ -n "${ML_QUIT_COMBO+x}" ] && QUIT_COMBO="$ML_QUIT_COMBO"
+[ -n "${ML_PAD_LAYOUT+x}" ] && PAD_LAYOUT="$ML_PAD_LAYOUT"
+[ -n "${ML_PAD_MAP+x}" ] && PAD_MAP="$ML_PAD_MAP"
+[ -n "${ML_PAD_WIRING+x}" ] && PAD_WIRING="$ML_PAD_WIRING"
 
 # moonlight reads this to build a quit combination out of buttons this device
 # actually has, matching each name against both key names and gamepad buttons.
@@ -79,10 +93,49 @@ fi
 if [ -n "$QUIT_COMBO" ]; then
     ML_QUIT_COMBO="$QUIT_COMBO"
     export ML_QUIT_COMBO
+else
+    # Cleared in the settings screen. The export from the first pass is still
+    # in this process's environment, and moonlight would go on using a
+    # combination the user has just removed.
+    unset ML_QUIT_COMBO
+fi
+
+# Which of the two arrangements of the face buttons the host should be told
+# about. The names in QUIT_COMBO are unaffected by this: they stay the ones the
+# key probe printed, because a quit has to be reachable either way.
+if [ -n "$PAD_LAYOUT" ]; then
+    ML_PAD_LAYOUT="$PAD_LAYOUT"
+    export ML_PAD_LAYOUT
+else
+    unset ML_PAD_LAYOUT
+fi
+
+# The table the settings screen writes when the buttons were pointed somewhere
+# by hand. It wins over PAD_LAYOUT, which is only the two presets, and is left
+# empty whenever one of those presets is what the user picked.
+if [ -n "$PAD_MAP" ]; then
+    ML_PAD_MAP="$PAD_MAP"
+    export ML_PAD_MAP
+else
+    unset ML_PAD_MAP
+fi
+
+# How the four face buttons are wired to what SDL reports. Left empty, both the
+# settings screen and the streamer work it out from the device; set it to
+# "labels" if a pad is ever numbered the way it is printed after all.
+if [ -n "$PAD_WIRING" ]; then
+    ML_PAD_WIRING="$PAD_WIRING"
+    export ML_PAD_WIRING
+else
+    unset ML_PAD_WIRING
 fi
 [ -n "${ML_NOTICE_TIMEOUT+x}" ] && NOTICE_TIMEOUT="$ML_NOTICE_TIMEOUT"
 
-echo "mode=$MODE host='${HOST:-<discover>}' app='$APP' ${WIDTH}x${HEIGHT}@${FPS} bitrate=${BITRATE} codec=$CODEC packetsize=${PACKETSIZE:-default} quit='${QUIT_COMBO:-none}'"
+echo "mode=$MODE host='${HOST:-<discover>}' app='$APP' ${WIDTH}x${HEIGHT}@${FPS} bitrate=${BITRATE} codec=$CODEC packetsize=${PACKETSIZE:-default} pad=${PAD_MAP:-${PAD_LAYOUT:-default}} quit='${QUIT_COMBO:-none}'"
+}
+
+MENU_USED=0
+load_settings
 
 # The panel this is drawing on, which is not something a config file should
 # have to guess: the MLP1's is 960x720, a 4:3 panel, so a 16:9 stream is both
@@ -217,6 +270,50 @@ fi
 # The host argument goes last, and only when there is one: with no argument
 # moonlight runs its own discovery and reports what it found.
 
+# The settings screen, when the file asks for it. Editing moonlight-user.conf
+# means editing a shell file on an SD card, which on a handheld with no
+# keyboard is not editing at all -- so the pak opens here instead, and whatever
+# the user picks comes back through one file: the settings are written into
+# moonlight-user.conf, the action into menu-action.
+if [ "$MODE" = menu ]; then
+    MENU_OUT="$DATA/menu-action"
+    : >"$MENU_OUT"
+    if [ -x "$PAK_DIR/$MENU" ]; then
+        echo "running: $MENU"
+        menu_rc=0
+        "./$MENU" --conf "$PAK_DIR/moonlight-user.conf" --out "$MENU_OUT" \
+            --timeout "${MENU_TIMEOUT:-600}" || menu_rc=$?
+        menu_action=$(cat "$MENU_OUT" 2>/dev/null || true)
+        echo "menu action: ${menu_action:-none} (exit $menu_rc)"
+        if [ -z "$menu_action" ] && [ "$menu_rc" != 0 ]; then
+            # It never opened a window, so nothing it might have printed was
+            # visible. Say it here instead of leaving a black screen with no
+            # reason, which is how this whole class of bug began.
+            notice "SETTINGS DID NOT START" \
+                "$MENU exited $menu_rc before choosing anything." \
+                "See moonlight.txt for its output." \
+                "Set MODE=stream in moonlight-user.conf" \
+                "to skip this screen."
+            exit 1
+        fi
+        if [ -z "$menu_action" ] || [ "$menu_action" = none ]; then
+            echo "no action chosen, stopping"
+            exit 0
+        fi
+        # Every setting may have changed while the screen was open, so read the
+        # file again. MODE in it is "menu" -- the screen is how the pak opens --
+        # so the action the user picked is what decides this run.
+        [ "$menu_action" = menu ] && menu_action=stream   # never back to here
+        load_settings
+        MODE="$menu_action"
+        MENU_USED=1
+    else
+        notice "SETTINGS UNAVAILABLE" "$MENU is missing from the pak." \
+            "Falling back to MODE=stream."
+        MODE=stream
+    fi
+fi
+
 case "$MODE" in
 pair)
     PAIR_OUT="$LOG_ROOT/moonlight-pair.txt"
@@ -300,6 +397,11 @@ pair)
         # rather than making them edit the file again before anything works.
         # Best effort: the card can be mounted read-only, and a failed pairing
         # must never be the thing that leaves MODE stuck on pair.
+        if [ "$MENU_USED" = 1 ]; then
+            # The settings screen is how the pak opens, so there is nothing to
+            # switch back: the user picks Action=stream on the next launch.
+            paired_note="Open the pak again and press START with Action set to stream."
+        else
         paired_note="Set MODE=stream in moonlight-user.conf and open again."
         if [ -w "$PAK_DIR/moonlight-user.conf" ] &&
             sed 's/^MODE=.*/MODE="stream"/' "$PAK_DIR/moonlight-user.conf" \
@@ -308,6 +410,7 @@ pair)
             rm -f "$PAK_DIR/.moonlight-user.conf.new"
             echo "moonlight-user.conf: MODE is now stream"
             paired_note="moonlight-user.conf is back on MODE=stream. Open the pak again to stream."
+        fi
         fi
         notice "PAIRED" "Pairing succeeded." "$paired_note"
     else
