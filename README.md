@@ -97,6 +97,28 @@ other "black screen" is about the network, not about rendering.
 A failed `stream` now says why on screen too (not paired / cannot reach host /
 app not on host) instead of ending in an empty screen.
 
+### When the picture is washed out
+
+A stream that is simply too bright — most obvious on the Windows desktop, less
+so inside a full-screen game — is the host, not the pak. If Windows **HDR** is
+on, the host brightens SDR content before capturing it and then encodes it as
+SDR, so what arrives is already too bright and this client shows it faithfully.
+Sunshine's own setup instructions say the same:
+
+> You must also enable the HDR option in your Moonlight client settings,
+> otherwise the stream will be SDR (and probably overexposed if your host is
+> HDR).
+
+Turn HDR off on the host (**`Win`+`Alt`+`B`**), or, if it has to stay on, pull
+**Settings → System → Display → SDR content brightness** down to 0.
+
+It is worth saying what this is not, because the client's colour path has been
+checked end to end: the stream is SDR and h264 (HDR needs an explicit `-hdr`
+and HEVC or AV1), the decoded frames are `YUV420P` and go into a `YV12` texture
+untouched, and SDL expands them from the limited range it was told to expect —
+measured, `Y=16→0`, `Y=128→131`, `Y=235→255` — which is exactly what a host
+sending limited range wants. Nothing in the pak is over-brightening anything.
+
 ### Settings
 
 | Variable | Meaning | Default |
