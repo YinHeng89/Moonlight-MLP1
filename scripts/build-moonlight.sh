@@ -120,6 +120,31 @@ log "verifying the key probe"
 bash /host/scripts/verify-binary.sh "$OUT/moonlight-keyprobe" /host/pak/device-libs.txt "${GLIBC_CEILING:-2.38}" \
   | tee "$OUT/verify-keyprobe.txt"
 
+# The settings screen. moonlight-user.conf lives on an SD card, which is a fine
+# place to keep settings and a hopeless place to edit them on a handheld with no
+# keyboard: this is the same file, reached with a d-pad.
+log "compiling the settings screen"
+"$CROSS-gcc" -O2 -std=c11 -Wall -Wextra \
+  $(pkg-config --cflags sdl2 SDL2_ttf) \
+  -o "$OUT/moonlight-menu-raw" /host/scripts/menu.c \
+  $(pkg-config --libs sdl2 SDL2_ttf)
+"$CROSS-strip" --strip-unneeded -o "$OUT/moonlight-menu" "$OUT/moonlight-menu-raw"
+rm -f "$OUT/moonlight-menu-raw"
+log "verifying the settings screen"
+bash /host/scripts/verify-binary.sh "$OUT/moonlight-menu" /host/pak/device-libs.txt "${GLIBC_CEILING:-2.38}" \
+  | tee "$OUT/verify-menu.txt"
+
+# The settings screen has to be right about the file the launcher sources, so it
+# proves it here, in the container, without a screen: --selftest reads a conf,
+# turns every kind of row, edits text and writes the file back.
+log "settings screen self-test"
+cp /host/pak/moonlight-user.conf "$OUT/menu-selftest.conf"
+# It opens no window and touches no joystick, but it is still linked against
+# SDL, and the container's loader will not find the sysroot's copy of it on
+# its own.
+LD_LIBRARY_PATH="$SYSROOT/usr/lib" \
+  "$OUT/moonlight-menu" --selftest --conf "$OUT/menu-selftest.conf" --out "$OUT/menu-selftest.out"
+
 # Hand the artifacts back to the checkout. /build is inside the container, and
 # package-pak.sh runs on the host, where it would find nothing: it assembles
 # the pak from build/mlp1. Copying here is what makes "build-moonlight.sh then
@@ -128,9 +153,9 @@ bash /host/scripts/verify-binary.sh "$OUT/moonlight-keyprobe" /host/pak/device-l
 HOST_OUT=/host/build/mlp1
 if [ -d /host ]; then
   mkdir -p "$HOST_OUT"
-  cp "$OUT/moonlight" "$OUT/moonlight-notice" "$OUT/moonlight-keyprobe" "$HOST_OUT/"
-  cp "$OUT/verify-binary.txt" "$OUT/verify-notice.txt" "$OUT/verify-keyprobe.txt" "$HOST_OUT/" 2>/dev/null || true
-  chmod 755 "$HOST_OUT/moonlight" "$HOST_OUT/moonlight-notice" "$HOST_OUT/moonlight-keyprobe"
+  cp "$OUT/moonlight" "$OUT/moonlight-notice" "$OUT/moonlight-keyprobe" "$OUT/moonlight-menu" "$HOST_OUT/"
+  cp "$OUT/verify-binary.txt" "$OUT/verify-notice.txt" "$OUT/verify-keyprobe.txt" "$OUT/verify-menu.txt" "$HOST_OUT/" 2>/dev/null || true
+  chmod 755 "$HOST_OUT/moonlight" "$HOST_OUT/moonlight-notice" "$HOST_OUT/moonlight-keyprobe" "$HOST_OUT/moonlight-menu"
 
   # The container runs as root, so anything it creates under /host comes out
   # owned by root. On a Linux host that matters: package-pak.sh then cannot

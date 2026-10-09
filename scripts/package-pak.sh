@@ -12,6 +12,7 @@ OUT="$BUILD/mlp1"
 [ -x "$OUT/moonlight" ] || { echo "no $OUT/moonlight -- run the build first" >&2; exit 1; }
 [ -x "$OUT/moonlight-notice" ] || { echo "no $OUT/moonlight-notice -- run the build first" >&2; exit 1; }
 [ -x "$OUT/moonlight-keyprobe" ] || { echo "no $OUT/moonlight-keyprobe -- run the build first" >&2; exit 1; }
+[ -x "$OUT/moonlight-menu" ] || { echo "no $OUT/moonlight-menu -- run the build first" >&2; exit 1; }
 [ -f "$REPO_ROOT/pak/res/icon.png" ] || { echo "no icon -- run scripts/make_icon.py" >&2; exit 1; }
 
 rm -rf "$PACKAGE"
@@ -26,11 +27,13 @@ cp "$REPO_ROOT/thirdparty/moonlight-embedded/third_party/SDL_GameControllerDB/ga
 cp "$OUT/moonlight" "$PACKAGE/moonlight"
 cp "$OUT/moonlight-notice" "$PACKAGE/moonlight-notice"
 cp "$OUT/moonlight-keyprobe" "$PACKAGE/moonlight-keyprobe"
+cp "$OUT/moonlight-menu" "$PACKAGE/moonlight-menu"
 cp "$OUT/verify-binary.txt" "$PACKAGE/verify-binary.txt" 2>/dev/null || true
 cp "$OUT/verify-notice.txt" "$PACKAGE/verify-notice.txt" 2>/dev/null || true
 cp "$OUT/verify-keyprobe.txt" "$PACKAGE/verify-keyprobe.txt" 2>/dev/null || true
+cp "$OUT/verify-menu.txt" "$PACKAGE/verify-menu.txt" 2>/dev/null || true
 
-chmod 755 "$PACKAGE/launch.sh" "$PACKAGE/moonlight" "$PACKAGE/moonlight-notice" "$PACKAGE/moonlight-keyprobe"
+chmod 755 "$PACKAGE/launch.sh" "$PACKAGE/moonlight" "$PACKAGE/moonlight-notice" "$PACKAGE/moonlight-keyprobe" "$PACKAGE/moonlight-menu"
 
 # Licence: moonlight-embedded is GPL-3.0-or-later, and the corresponding source
 # for this exact binary is reproducible with the scripts in scripts/.
