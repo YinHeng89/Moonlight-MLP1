@@ -63,7 +63,7 @@ row you can change with the d-pad:
 
 ```
 Action          stream        <- what START runs
-PC address      192.168.100.126
+PC address      192.168.1.20
 App on PC       Steam
 Resolution      960x720
 Frame rate      30
