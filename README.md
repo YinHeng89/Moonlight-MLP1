@@ -51,6 +51,36 @@ Copy `build/package/Moonlight.pak` to the SD card:
 
 Everything the launch prints goes to the shared log, `moonlight.txt`.
 
+### The settings screen
+
+`MODE="menu"` is the default, so opening the pak shows every setting above as a
+row you can change with the d-pad:
+
+```
+Action          stream        <- what START runs
+PC address      192.168.100.126
+App on PC       Steam
+Resolution      960x720
+Frame rate      30
+Bitrate         5000
+Codec           h264
+Packet size     1024
+Face buttons    xbox            <- nintendo | xbox | custom
+A (right)   ->  B               <- what each printed button gives the game
+B (bottom)  ->  A
+X (top)     ->  Y
+Y (left)    ->  X
+Quit combo      back,start
+START           run             <- save and launch Action
+Save and exit   write
+```
+
+Up/Down moves, Left/Right changes, **START anywhere saves and launches**, B
+leaves without saving, and A edits the two text rows character by character.
+
+Set `MODE="stream"` by hand once you have settled on the settings and the pak
+skips the screen entirely
+
 ### When nothing appears on screen
 
 Set `MODE="diag"` and open the pak. It does not stream; it measures whether
@@ -68,7 +98,8 @@ app not on host) instead of ending in an empty screen.
 |---|---|---|
 | `HOST` | PC address; empty = mDNS autodiscovery | empty |
 | `APP` | application name on the host | `Steam` |
-| `MODE` | `stream` / `pair` / `list` / `diag` / `probe` / `quit` | `stream` |
+| `MODE` | `menu` / `stream` / `pair` / `list` / `diag` / `probe` / `quit` | `menu` |
+| `PAD_MAP` | per-button override, `a=B,b=A,x=Y,y=X` — written by the settings screen | empty |
 | `WIDTH`/`HEIGHT`/`FPS` | stream geometry — the panel is 960x720 4:3, and 30 is what software decode keeps up with | `960`/`720`/`30` |
 | `BITRATE` | Kbps | `5000` |
 | `CODEC` | `h264` or `hevc` | `h264` |
@@ -120,6 +151,101 @@ which buttons exist cannot ask for a button that does not exist to stop it.
 
 Releasing any part of the combination disarms the whole thing, so it can never
 be left half-pressed waiting to fire mid-game.
+
+### Which button is A
+
+The MLP1's four face buttons are arranged the way a Nintendo pad's are — **A on
+the right, B at the bottom, X on top, Y on the left**. But what gets streamed is
+a PC game, and a PC game draws its prompts for an Xbox pad: **confirm at the
+bottom, cancel on the right**. So the letter printed on the button and the
+picture the game draws disagree, and one of them has to win:
+
+> The pad is not in SDL's database, so SDL numbers its buttons the way Linux
+> does — **by position**, which puts "A" where B is printed. The pak corrects
+> for that in both halves (the streamer and the settings screen), so every
+> letter below means the letter printed on the button. Everywhere in this
+> project, "A" is the key on the right.
+
+| `PAD_LAYOUT` | pressing the button printed … | the host receives | so |
+|---|---|---|---|
+| **`xbox`** *(default)* | B (bottom) | A | the position decides: bottom confirms, as drawn |
+| `nintendo` | A (right) | A | the letter decides: the printed A confirms |
+
+`xbox` is a plain swap of A↔B and X↔Y, which is all that separates the two
+arrangements, and it is the default because the games are PC games: the bottom
+button — printed B — is the one they mean by "A". Steam has the same switch on
+its side ("Use Nintendo Button Layout"), and with the default it should be
+**off**: pick one of the two, not both, or they cancel out.
+
+The settings screen is the exception. It is not a game and it runs on the
+device, so it speaks the letters that are printed: **the right button (A) is
+confirm there, the bottom one (B) is back** — which is the way round your thumb
+already expects in a menu.
+
+When neither preset is right — some games read the letter, some read the
+position, and they do not agree with each other — pick `custom` and point each
+printed button at any button the host should hear:
+
+```sh
+PAD_LAYOUT="custom"
+PAD_MAP="a=B,b=A,x=Y,y=X"   # printed A gives B, printed B gives A, and so on
+```
+
+The settings screen writes this for you when you change one of the four rows.
+Empty entries are allowed and mean "leave that button alone". `PAD_MAP` wins
+over `PAD_LAYOUT` whenever both are set.
+
+`QUIT_COMBO` is not affected: it always uses the names the probe reported, so
+the way out stays where your thumb expects it in either layout.
+
+If a pad is ever numbered the way it is printed after all — so that A and B
+come out swapped the wrong way round — say so in `PAD_WIRING` and no detection
+is done at all:
+
+```sh
+PAD_WIRING=""        # default: work it out from the device
+PAD_WIRING="labels"  # SDL's names are already the printed ones
+PAD_WIRING="positions"  # SDL numbers by position; A and B are swapped
+```
+
+It is read by both halves, so a wrong guess can be undone by editing the
+config file — no rebuild — and the decision is printed to the log either way.
+
+### Resolution, and making the host match it
+
+The panel is `960x720`, 4:3 — confirmed by the probe, not read off a spec
+sheet. Asking for exactly that means the frames arrive 1:1: nothing is scaled
+on the way to the screen, nothing is cropped, and there is no letterboxing. It
+is also 25% fewer pixels than 1280x720, which matters more here than anywhere
+else because the decoder is software.
+
+What `WIDTH`/`HEIGHT` cannot do is change the **host's** display, and a host
+still running a 16:9 desktop has its picture squeezed into a 4:3 frame — black
+bars at best, stretched at worst. Sunshine has to be told to switch:
+
+- **Windows** — nothing to do, recent Sunshine changes the resolution itself.
+- **macOS** — install `displayplacer`, then add a global prep command in
+  Sunshine's Configuration tab, which runs before every session and undoes
+  itself after:
+
+  ```sh
+  # do
+  sh -c "displayplacer \"id:<screen id> res:${SUNSHINE_CLIENT_WIDTH}x${SUNSHINE_CLIENT_HEIGHT} hz:${SUNSHINE_CLIENT_FPS} scaling:on origin:(0,0) degree:0\""
+  # undo
+  displayplacer "id:<screen id> res:1728x1117 hz:120 scaling:on origin:(0,0) degree:0"
+  ```
+
+  Get `<screen id>` and the mode to restore from `displayplacer list`. If the
+  Mac refuses `960x720` (macOS only offers a fixed set of modes), use
+  `1024x768` on both sides — 4:3 like the panel, and the client scales it down
+  by 6%, which is invisible.
+- **Linux** — the same prep command with `xrandr`, `kscreen-doctor` or
+  `wlr-xrandr`, whichever your session uses.
+
+One correction worth making: resolution is not what costs bandwidth, `BITRATE`
+is. Lowering the resolution buys decoding headroom on the handheld (the actual
+bottleneck, since there is no hardware decoder in this build) and less work for
+the host's GPU. If the network is the problem, lower `BITRATE` instead.
 
 ## Reproducing the binary
 
