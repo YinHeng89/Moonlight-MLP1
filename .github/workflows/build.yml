@@ -90,14 +90,8 @@ jobs:
           # at this commit. Empty on a tag push, where the ref already says it.
           tag_name: ${{ inputs.release_tag || github.ref_name }}
           files: build/dist/Moonlight.mlp1.pak.zip
-          body: |
-            moonlight-embedded cross-compiled for the Miniloong Pocket 1
-            (RK3566, aarch64), packaged as a Leaf tool pak.
-
-            `verify-binary.txt` in the build log is the compliance check:
-            AArch64, stripped, no RPATH, no glibc symbol above 2.38, and every
-            NEEDED library is one the device provides.
-
-            **Rendering is not covered by CI** — the toolchain's SDL2 has no
-            video driver usable in a container. Discovery, pairing, TLS and
-            decoding are exercised; the picture itself needs a device.
+          # What changed lives beside the release it describes rather than in
+          # this file, so editing the notes is a commit and not a workflow
+          # change -- and a re-run of an older tag still finds the notes that
+          # were current when that tag was cut.
+          body_path: RELEASE_NOTES.md

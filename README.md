@@ -11,11 +11,16 @@ publishes it. Building from source is described further down.
 ## What is in here
 
 ```
-build/mlp1/moonlight           the client, 7.9 MB stripped, one self-contained file
-build/mlp1/moonlight-notice    fullscreen message program (shows the pairing PIN)
+build/mlp1/moonlight           the client, 8.0 MB stripped, one self-contained file
+build/mlp1/moonlight-notice    fullscreen messages: the PIN, why a launch failed
+build/mlp1/moonlight-menu      the settings screen, driven with the d-pad
+build/mlp1/moonlight-keyprobe  reports what each physical button is called
 build/package/Moonlight.pak    the assembled pak, ready to copy to the SD card
 build/dist/Moonlight.mlp1.pak.zip  the same pak, zipped
 ```
+
+`RELEASE_NOTES.md` describes the release it belongs to and is what a published
+release shows as its notes.
 
 ## Why the Embedded flavour and not Qt
 
