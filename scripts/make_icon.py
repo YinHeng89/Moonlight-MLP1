@@ -4,7 +4,15 @@
 Pure standard library -- nothing in the build environment has to provide Pillow
 for this, and there is no gradient stroke to turn into moire noise. Supersampled
 4x and boxed down so the crescent's edge is smooth.
+
+This draws the icon *if there is none*. The icon now shipped is upstream
+Moonlight's own wheel mark, which this script cannot reproduce; running it over
+that file would only replace something better with something worse. Give it a
+path of its own to get the crescent:
+
+    scripts/make_icon.py /tmp/crescent.png
 """
+import os
 import struct
 import sys
 import zlib
@@ -95,6 +103,11 @@ def write_png(surf, path):
 
 def main():
     path = sys.argv[1] if len(sys.argv) > 1 else "res/icon.png"
+
+    if os.path.exists(path) and not os.environ.get("MAKE_ICON_OVERWRITE"):
+        print("kept", path, "-- already there; MAKE_ICON_OVERWRITE=1 to redraw")
+        return
+
     plate = Surface(SS_SIZE, SS_SIZE)
     rounded_plate(plate, SS_SIZE * 96 // SIZE, BG)
 
